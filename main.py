@@ -35,8 +35,8 @@ def deduplicate_memberships(df):
     df['Created Date'] = pd.to_datetime(df['Created Date'])
     df['Expiration Date'] = pd.to_datetime(df['Expiration Date'])
     
-    # Sort by Customer Name and Created Date (newest first)
-    df_sorted = df.sort_values(['Customer Name', 'Created Date'], ascending=[True, False])
+    # Sort by Customer Name and Created Date (oldest to newest)
+    df_sorted = df.sort_values(['Customer Name', 'Created Date'], ascending=[True, True])
     
     # Group by Customer Name
     grouped = df_sorted.groupby('Customer Name')
@@ -53,34 +53,24 @@ def deduplicate_memberships(df):
         
         # Process multiple records for the same customer
         keep_records = []
-        i = 0
         
-        while i < len(group_list):
+        for i in range(len(group_list)):
             current_record = group_list[i]
-            
-            # Check if this record should be kept
             should_keep = True
             
-            # Look for renewals (records created within 7 days after expiration)
-            for j in range(i + 1, len(group_list)):
-                next_record = group_list[j]
+            # Check if the next record is a renewal within 7 days
+            if i < len(group_list) - 1:
+                next_record = group_list[i + 1]
                 
-                # Calculate days between expiration and next creation
-                days_diff = (current_record['Expiration Date'] - next_record['Created Date']).days
+                # Calculate days between current expiration and next creation
+                days_diff = (next_record['Created Date'] - current_record['Expiration Date']).days
                 
-                # If next record is created within 7 days after current expiration, it's a renewal
-                if -7 <= days_diff <= 7:
-                    should_keep = False
-                    break
+                # If next record starts within 7 days after current expires, it's a renewal
+                if days_diff <= 7:
+                    should_keep = False  # Remove the older record
             
             if should_keep:
                 keep_records.append(current_record)
-            
-            i += 1
-        
-        # If no records are kept (all were renewals), keep the most recent one
-        if not keep_records:
-            keep_records.append(group_list[0])
         
         deduplicated_records.extend(keep_records)
     
