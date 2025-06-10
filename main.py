@@ -15,6 +15,52 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def categorize_and_sort_memberships(df):
+    """
+    Categorize memberships by expiration status and sort them.
+    
+    Args:
+        df: DataFrame with customer membership data
+        
+    Returns:
+        DataFrame sorted by expiration category and date
+    """
+    # Ensure we have the required column
+    if 'Expiration Date' not in df.columns:
+        raise ValueError("Required column 'Expiration Date' not found in the data")
+    
+    # Ensure Expiration Date is datetime
+    df['Expiration Date'] = pd.to_datetime(df['Expiration Date'])
+    
+    # Get today's date
+    today = pd.Timestamp.now().normalize()
+    
+    # Calculate days until expiration
+    df['Days Until Expiration'] = (df['Expiration Date'] - today).dt.days
+    
+    # Categorize memberships
+    def categorize_membership(days_until_exp):
+        if days_until_exp < 0:
+            return 'Expired'
+        elif days_until_exp <= 30:
+            return 'Expiring Soon'
+        else:
+            return 'Active'
+    
+    df['Expiration Category'] = df['Days Until Expiration'].apply(categorize_membership)
+    
+    # Define category order for sorting
+    category_order = {'Expired': 0, 'Expiring Soon': 1, 'Active': 2}
+    df['Category Order'] = df['Expiration Category'].map(category_order)
+    
+    # Sort by category first, then by expiration date ascending within each category
+    df_sorted = df.sort_values(['Category Order', 'Expiration Date'], ascending=[True, True])
+    
+    # Remove helper columns
+    df_sorted = df_sorted.drop(['Days Until Expiration', 'Category Order'], axis=1)
+    
+    return df_sorted
+
 def deduplicate_memberships(df):
     """
     Deduplicate customer memberships based on renewal logic.
@@ -108,20 +154,23 @@ def process_file():
             deduplicated_df = deduplicate_memberships(df)
             deduplicated_count = len(deduplicated_df)
             
+            # Categorize and sort by expiration status
+            final_df = categorize_and_sort_memberships(deduplicated_df)
+            
             # Save the processed file to a temporary location
             temp_dir = tempfile.gettempdir()
             output_filename = f"deduplicated_{secure_filename(file.filename)}"
             output_path = os.path.join(temp_dir, output_filename)
             
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                deduplicated_df.to_excel(writer, index=False, sheet_name='Deduplicated')
+                final_df.to_excel(writer, index=False, sheet_name='Deduplicated')
             
             return render_template('results.html', 
                                  original_count=original_count,
                                  deduplicated_count=deduplicated_count,
                                  reduction=original_count - deduplicated_count,
                                  filename=output_filename,
-                                 preview_data=deduplicated_df.head(10).to_html(classes='table table-striped', index=False))
+                                 preview_data=final_df.head(10).to_html(classes='table table-striped', index=False))
             
         except Exception as e:
             flash(f'Error processing file: {str(e)}')
