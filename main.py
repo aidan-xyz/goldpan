@@ -114,7 +114,7 @@ def categorize_and_sort_memberships(df):
 
 def format_for_hubspot_export(df):
     """
-    Format the dataframe for HubSpot export with proper date formatting and individual boolean tag columns.
+    Format the dataframe for HubSpot export with proper date formatting and a multi-checkbox tags column.
     
     Args:
         df: DataFrame with processed membership data
@@ -142,13 +142,8 @@ def format_for_hubspot_export(df):
     hubspot_df['Days Until Expiration'] = (hubspot_df['Expiration Date_dt'] - today).dt.days
     hubspot_df['Days Since Start'] = (today - hubspot_df['Start Date_dt']).dt.days
     
-    # Initialize all tag columns as FALSE
-    hubspot_df['High-Value Customer'] = False
-    hubspot_df['Low-Value Customer'] = False
-    hubspot_df['Not Enrolled'] = False
-    hubspot_df['Active Membership'] = False
-    hubspot_df['Expiring Soon'] = False
-    hubspot_df['Recently Renewed'] = False
+    # Initialize Customer Tags column
+    hubspot_df['Customer Tags'] = ''
     
     # Apply tagging logic
     for idx, row in hubspot_df.iterrows():
@@ -157,32 +152,37 @@ def format_for_hubspot_export(df):
         total_value = row.get('Total Order Value', 0)
         membership_status = str(row.get('Membership', '')).lower()
         
+        tags = []
+        
         # Check if expired or expiring within 30 days
         is_expired_or_expiring = days_until_exp <= 30
         
-        # High-Value Customer: expired/expiring within 30 days AND total order value > 500
+        # High-Value Customer: expired/expiring within 30 days AND total order value > 1000
         if is_expired_or_expiring and total_value > 1000:
-            hubspot_df.at[idx, 'High-Value Customer'] = True
+            tags.append('High-Value Customer')
         
-        # Low-Value Customer: expired/expiring within 30 days AND total order value <= 500
+        # Low-Value Customer: expired/expiring within 30 days AND total order value <= 1000
         if is_expired_or_expiring and total_value <= 1000:
-            hubspot_df.at[idx, 'Low-Value Customer'] = True
+            tags.append('Low-Value Customer')
         
         # Not Enrolled: membership status is "Not Enrolled"
         if 'not enrolled' in membership_status:
-            hubspot_df.at[idx, 'Not Enrolled'] = True
+            tags.append('Not Enrolled')
         
         # Active Membership: active and NOT expiring within 30 days
         if days_until_exp > 30:
-            hubspot_df.at[idx, 'Active Membership'] = True
+            tags.append('Active Membership')
         
         # Expiring Soon: expiring within 30 days (but not expired)
         if 0 <= days_until_exp <= 30:
-            hubspot_df.at[idx, 'Expiring Soon'] = True
+            tags.append('Expiring Soon')
         
         # Recently Renewed: start date within last 30 days
         if days_since_start <= 30:
-            hubspot_df.at[idx, 'Recently Renewed'] = True
+            tags.append('Recently Renewed')
+        
+        # Join all applicable tags with semicolon
+        hubspot_df.at[idx, 'Customer Tags'] = ';'.join(tags)
     
     # Clean up temporary columns
     hubspot_df = hubspot_df.drop(['Expiration Date_dt', 'Start Date_dt', 'Days Until Expiration', 'Days Since Start'], axis=1)
