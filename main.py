@@ -161,11 +161,11 @@ def format_for_hubspot_export(df):
         is_expired_or_expiring = days_until_exp <= 30
         
         # High-Value Customer: expired/expiring within 30 days AND total order value > 500
-        if is_expired_or_expiring and total_value > 500:
+        if is_expired_or_expiring and total_value > 1000:
             hubspot_df.at[idx, 'High-Value Customer'] = True
         
         # Low-Value Customer: expired/expiring within 30 days AND total order value <= 500
-        if is_expired_or_expiring and total_value <= 500:
+        if is_expired_or_expiring and total_value <= 1000:
             hubspot_df.at[idx, 'Low-Value Customer'] = True
         
         # Not Enrolled: membership status is "Not Enrolled"
