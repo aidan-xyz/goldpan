@@ -126,6 +126,59 @@ def categorize_and_sort_memberships(df):
     
     return df_sorted
 
+def format_for_hubspot_export(df, value_threshold=5000):
+    """
+    Format the dataframe for HubSpot export with proper date formatting and WC Parameter column.
+    
+    Args:
+        df: DataFrame with processed membership data
+        value_threshold: Threshold value for determining high/low value customers
+        
+    Returns:
+        DataFrame formatted for HubSpot
+    """
+    # Create a copy to avoid modifying the original
+    hubspot_df = df.copy()
+    
+    # Format dates to YYYY-MM-DD format
+    if 'Created Date' in hubspot_df.columns:
+        hubspot_df['Created Date'] = pd.to_datetime(hubspot_df['Created Date']).dt.strftime('%Y-%m-%d')
+        hubspot_df = hubspot_df.rename(columns={'Created Date': 'Start Date'})
+    
+    if 'Expiration Date' in hubspot_df.columns:
+        hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date']).dt.strftime('%Y-%m-%d')
+    
+    # Create WC Parameter column
+    def create_wc_parameter(row):
+        parameters = []
+        
+        # Always include these required parameters
+        parameters.append('Expiration Date')
+        parameters.append('Start Date')
+        
+        # Get expiration category and total order value
+        expiration_category = row.get('Expiration Category', '')
+        total_value = row.get('Total Order Value', 0)
+        membership_status = row.get('Membership', '')
+        
+        # Add status-based parameters
+        if expiration_category in ['Expired', 'Expiring Soon']:
+            if total_value > value_threshold:
+                parameters.append('High-Value Customer')
+            else:
+                parameters.append('Low-Value Customer')
+        elif expiration_category == 'Active':
+            parameters.append('Active Membership')
+        elif 'not enrolled' in membership_status.lower():
+            parameters.append('Not Enrolled')
+        
+        # Join with semicolons as required by HubSpot
+        return ';'.join(parameters)
+    
+    hubspot_df['WC Parameter'] = hubspot_df.apply(create_wc_parameter, axis=1)
+    
+    return hubspot_df
+
 def deduplicate_memberships(df):
     """
     Deduplicate customer memberships based on renewal logic.
@@ -209,6 +262,10 @@ def process_file():
         flash('Both files must be selected')
         return redirect(request.url)
     
+    # Get export format and value threshold
+    export_format = request.form.get('export_format', 'standard')
+    value_threshold = int(request.form.get('value_threshold', 5000))
+    
     if (membership_file and allowed_file(membership_file.filename) and 
         orders_file and allowed_file(orders_file.filename)):
         try:
@@ -229,19 +286,31 @@ def process_file():
             # Categorize and sort by expiration status
             final_df = categorize_and_sort_memberships(processed_df)
             
+            # Apply HubSpot formatting if selected
+            if export_format == 'hubspot':
+                final_df = format_for_hubspot_export(final_df, value_threshold)
+                file_extension = 'csv'
+                output_filename = f"hubspot_{secure_filename(membership_file.filename).rsplit('.', 1)[0]}.csv"
+            else:
+                file_extension = 'xlsx'
+                output_filename = f"processed_{secure_filename(membership_file.filename)}"
+            
             # Save the processed file to a temporary location
             temp_dir = tempfile.gettempdir()
-            output_filename = f"processed_{secure_filename(membership_file.filename)}"
             output_path = os.path.join(temp_dir, output_filename)
             
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                final_df.to_excel(writer, index=False, sheet_name='Processed_Data')
+            if file_extension == 'csv':
+                final_df.to_csv(output_path, index=False)
+            else:
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    final_df.to_excel(writer, index=False, sheet_name='Processed_Data')
             
             return render_template('results.html', 
                                  original_count=original_count,
                                  deduplicated_count=deduplicated_count,
                                  reduction=original_count - deduplicated_count,
                                  filename=output_filename,
+                                 export_format=export_format,
                                  preview_data=final_df.head(10).to_html(classes='table table-striped', index=False))
             
         except Exception as e:

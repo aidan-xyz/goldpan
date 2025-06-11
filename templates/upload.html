@@ -71,6 +71,29 @@
                     </div>
                 </div>
                 
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5>Export Options</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label class="form-label">Export Format:</label>
+                                <select class="form-select" name="export_format">
+                                    <option value="standard">Standard Excel (.xlsx)</option>
+                                    <option value="hubspot">HubSpot CSV (.csv)</option>
+                                </select>
+                                <small class="text-muted">HubSpot format includes multi-checkbox WC Parameter and formatted dates</small>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">High-Value Threshold ($):</label>
+                                <input type="number" class="form-control" name="value_threshold" value="5000" min="0">
+                                <small class="text-muted">Customers above this amount are considered high-value</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="text-center mt-4">
                     <button type="submit" class="btn btn-primary btn-lg">
                         Process Files
@@ -97,6 +120,16 @@
                             <strong>Orders File:</strong>
                             <small class="text-muted d-block">
                                 SAP ID (Column A), Total Value (Column L), and other order details
+                            </small>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <strong>HubSpot Export Features:</strong>
+                            <small class="text-muted d-block">
+                                • Dates formatted as YYYY-MM-DD<br>
+                                • WC Parameter multi-checkbox field with status indicators<br>
+                                • Value tier classification based on threshold
                             </small>
                         </div>
                     </div>
