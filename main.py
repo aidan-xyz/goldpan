@@ -43,6 +43,10 @@ def process_orders_and_add_value_tiers(membership_df, orders_df):
     order_totals = orders_df.groupby('SAP ID')['Total Value'].sum().reset_index()
     order_totals.columns = ['SAP ID', 'Total Order Value']
     
+    # Ensure both IDs are strings before merging
+    membership_df['Cust ID'] = membership_df['Cust ID'].astype(str)
+    order_totals['SAP ID'] = order_totals['SAP ID'].astype(str)
+    
     # Merge membership data with order totals
     # Assuming Cust ID and SAP ID refer to the same customer identifier
     membership_df = membership_df.merge(
