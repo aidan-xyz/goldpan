@@ -15,6 +15,67 @@ ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def process_orders_and_add_value_tiers(membership_df, orders_df):
+    """
+    Process orders file and add Total Order Value and Customer Value Tier columns to membership data.
+    
+    Args:
+        membership_df: DataFrame with membership data (Cust ID)
+        orders_df: DataFrame with orders data (SAP ID, Total Value)
+        
+    Returns:
+        DataFrame with added columns
+    """
+    # Ensure we have the required columns
+    if 'Cust ID' not in membership_df.columns:
+        raise ValueError("Required column 'Cust ID' not found in membership data")
+    if 'SAP ID' not in orders_df.columns:
+        raise ValueError("Required column 'SAP ID' not found in orders data")
+    if 'Total Value' not in orders_df.columns:
+        raise ValueError("Required column 'Total Value' not found in orders data")
+    if 'Membership' not in membership_df.columns:
+        raise ValueError("Required column 'Membership' not found in membership data")
+    
+    # Convert Total Value to numeric, handling any non-numeric values
+    orders_df['Total Value'] = pd.to_numeric(orders_df['Total Value'], errors='coerce').fillna(0)
+    
+    # Group orders by SAP ID and sum total values
+    order_totals = orders_df.groupby('SAP ID')['Total Value'].sum().reset_index()
+    order_totals.columns = ['SAP ID', 'Total Order Value']
+    
+    # Merge membership data with order totals
+    # Assuming Cust ID and SAP ID refer to the same customer identifier
+    membership_df = membership_df.merge(
+        order_totals, 
+        left_on='Cust ID', 
+        right_on='SAP ID', 
+        how='left'
+    )
+    
+    # Fill NaN values with 0 for customers with no orders
+    membership_df['Total Order Value'] = membership_df['Total Order Value'].fillna(0)
+    
+    # Create Customer Value Tier column
+    def calculate_value_tier(row):
+        membership_status = row['Membership']
+        total_value = row['Total Order Value']
+        
+        if membership_status in ['Expired', 'Expiring Soon']:
+            if total_value > 5000:
+                return 'High Value'
+            else:
+                return 'Low Value'
+        else:
+            return ''  # Leave blank for Active memberships
+    
+    membership_df['Customer Value Tier'] = membership_df.apply(calculate_value_tier, axis=1)
+    
+    # Drop the SAP ID column as it's redundant with Cust ID
+    if 'SAP ID' in membership_df.columns:
+        membership_df = membership_df.drop('SAP ID', axis=1)
+    
+    return membership_df
+
 def categorize_and_sort_memberships(df):
     """
     Categorize memberships by expiration status and sort them.
@@ -132,38 +193,45 @@ def upload_file():
 
 @app.route('/process', methods=['POST'])
 def process_file():
-    if 'file' not in request.files:
-        flash('No file selected')
+    # Check if both files are present
+    if 'membership_file' not in request.files or 'orders_file' not in request.files:
+        flash('Both membership and orders files are required')
         return redirect(request.url)
     
-    file = request.files['file']
+    membership_file = request.files['membership_file']
+    orders_file = request.files['orders_file']
     
-    if file.filename == '':
-        flash('No file selected')
+    if membership_file.filename == '' or orders_file.filename == '':
+        flash('Both files must be selected')
         return redirect(request.url)
     
-    if file and allowed_file(file.filename):
+    if (membership_file and allowed_file(membership_file.filename) and 
+        orders_file and allowed_file(orders_file.filename)):
         try:
-            # Read the Excel file
-            df = pd.read_excel(file)
+            # Read both Excel files
+            membership_df = pd.read_excel(membership_file)
+            orders_df = pd.read_excel(orders_file)
             
             # Show preview of original data
-            original_count = len(df)
+            original_count = len(membership_df)
             
-            # Perform deduplication
-            deduplicated_df = deduplicate_memberships(df)
+            # Perform deduplication on membership data
+            deduplicated_df = deduplicate_memberships(membership_df)
             deduplicated_count = len(deduplicated_df)
             
+            # Process orders and add value tiers
+            processed_df = process_orders_and_add_value_tiers(deduplicated_df, orders_df)
+            
             # Categorize and sort by expiration status
-            final_df = categorize_and_sort_memberships(deduplicated_df)
+            final_df = categorize_and_sort_memberships(processed_df)
             
             # Save the processed file to a temporary location
             temp_dir = tempfile.gettempdir()
-            output_filename = f"deduplicated_{secure_filename(file.filename)}"
+            output_filename = f"processed_{secure_filename(membership_file.filename)}"
             output_path = os.path.join(temp_dir, output_filename)
             
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                final_df.to_excel(writer, index=False, sheet_name='Deduplicated')
+                final_df.to_excel(writer, index=False, sheet_name='Processed_Data')
             
             return render_template('results.html', 
                                  original_count=original_count,
@@ -173,10 +241,10 @@ def process_file():
                                  preview_data=final_df.head(10).to_html(classes='table table-striped', index=False))
             
         except Exception as e:
-            flash(f'Error processing file: {str(e)}')
+            flash(f'Error processing files: {str(e)}')
             return redirect(url_for('upload_file'))
     else:
-        flash('Invalid file type. Please upload an Excel file (.xlsx or .xls)')
+        flash('Invalid file type. Please upload Excel files (.xlsx or .xls)')
         return redirect(url_for('upload_file'))
 
 @app.route('/download/<filename>')
