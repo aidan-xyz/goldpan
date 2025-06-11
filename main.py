@@ -295,9 +295,14 @@ def process_file():
             # Categorize and sort by expiration status
             final_df = categorize_and_sort_memberships(processed_df)
             
+            # Remove any completely empty columns
+            final_df = final_df.dropna(axis=1, how='all')
+            
             # Apply HubSpot formatting if selected
             if export_format == 'hubspot':
                 final_df = format_for_hubspot_export(final_df)
+                # Remove empty columns again after HubSpot formatting
+                final_df = final_df.dropna(axis=1, how='all')
                 file_extension = 'csv'
                 output_filename = f"hubspot_{secure_filename(membership_file.filename).rsplit('.', 1)[0]}.csv"
             else:
