@@ -6,7 +6,7 @@ from werkzeug.utils import secure_filename
 import tempfile
 
 app = Flask(__name__)
-app.secret_key = 'your-secret-key-here'
+app.secret_key = 'your-secret-key-here' # REMINDER: Change this to a strong, securely stored key
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
 ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
@@ -17,11 +17,11 @@ def allowed_file(filename):
 def process_orders_and_add_value_tiers(membership_df, orders_df):
     """
     Process orders file and add Total Order Value and Estimated Savings columns to membership data.
-    
+
     Args:
         membership_df: DataFrame with membership data (Cust ID)
         orders_df: DataFrame with orders data (SAP ID, Total Value)
-        
+
     Returns:
         DataFrame with added columns
     """
@@ -32,18 +32,18 @@ def process_orders_and_add_value_tiers(membership_df, orders_df):
         raise ValueError("Required column 'SAP ID' not found in orders data")
     if 'Total Value' not in orders_df.columns:
         raise ValueError("Required column 'Total Value' not found in orders data")
-    
+
     # Convert Total Value to numeric, handling any non-numeric values
     orders_df['Total Value'] = pd.to_numeric(orders_df['Total Value'], errors='coerce').fillna(0)
-    
+
     # Group orders by SAP ID and sum total values
     order_totals = orders_df.groupby('SAP ID')['Total Value'].sum().reset_index()
     order_totals.columns = ['SAP ID', 'Total Order Value']
-    
+
     # Ensure both IDs are strings before merging
     membership_df['Cust ID'] = membership_df['Cust ID'].astype(str)
     order_totals['SAP ID'] = order_totals['SAP ID'].astype(str)
-    
+
     # Merge membership data with order totals
     # Assuming Cust ID and SAP ID refer to the same customer identifier
     membership_df = membership_df.merge(
@@ -52,42 +52,42 @@ def process_orders_and_add_value_tiers(membership_df, orders_df):
         right_on='SAP ID', 
         how='left'
     )
-    
+
     # Fill NaN values with 0 for customers with no orders
     membership_df['Total Order Value'] = membership_df['Total Order Value'].fillna(0)
-    
+
     # Add Estimated Savings column (Total Order Value * 8%)
     membership_df['Estimated Savings'] = membership_df['Total Order Value'] * 0.08
-    
+
     # Drop the SAP ID column as it's redundant with Cust ID
     if 'SAP ID' in membership_df.columns:
         membership_df = membership_df.drop('SAP ID', axis=1)
-    
+
     return membership_df
 
 def categorize_and_sort_memberships(df):
     """
     Categorize memberships by expiration status and sort them.
-    
+
     Args:
         df: DataFrame with customer membership data
-        
+
     Returns:
         DataFrame sorted by expiration category and date
     """
     # Ensure we have the required column
     if 'Expiration Date' not in df.columns:
         raise ValueError("Required column 'Expiration Date' not found in the data")
-    
+
     # Ensure Expiration Date is datetime
     df['Expiration Date'] = pd.to_datetime(df['Expiration Date'])
-    
+
     # Get today's date
     today = pd.Timestamp.now().normalize()
-    
+
     # Calculate days until expiration
     df['Days Until Expiration'] = (df['Expiration Date'] - today).dt.days
-    
+
     # Categorize memberships
     def categorize_membership(days_until_exp):
         if days_until_exp < 0:
@@ -96,105 +96,28 @@ def categorize_and_sort_memberships(df):
             return 'Expiring Soon'
         else:
             return 'Active'
-    
+
     df['Expiration Category'] = df['Days Until Expiration'].apply(categorize_membership)
-    
+
     # Define category order for sorting
     category_order = {'Expired': 0, 'Expiring Soon': 1, 'Active': 2}
     df['Category Order'] = df['Expiration Category'].map(category_order)
-    
+
     # Sort by category first, then by expiration date ascending within each category
     df_sorted = df.sort_values(['Category Order', 'Expiration Date'], ascending=[True, True])
-    
+
     # Remove helper columns
     df_sorted = df_sorted.drop(['Days Until Expiration', 'Category Order'], axis=1)
-    
-    return df_sorted
 
-def format_for_hubspot_export(df):
-    """
-    Format the dataframe for HubSpot export with proper date formatting and individual boolean tag columns.
-    
-    Args:
-        df: DataFrame with processed membership data
-        
-    Returns:
-        DataFrame formatted for HubSpot
-    """
-    # Create a copy to avoid modifying the original
-    hubspot_df = df.copy()
-    
-    # Format dates to YYYY-MM-DD format
-    if 'Created Date' in hubspot_df.columns:
-        hubspot_df['Created Date'] = pd.to_datetime(hubspot_df['Created Date']).dt.strftime('%Y-%m-%d')
-        hubspot_df = hubspot_df.rename(columns={'Created Date': 'Start Date'})
-    
-    if 'Expiration Date' in hubspot_df.columns:
-        hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date']).dt.strftime('%Y-%m-%d')
-    
-    # Get today's date for calculations
-    today = pd.Timestamp.now().normalize()
-    
-    # Calculate days until expiration and since start
-    hubspot_df['Expiration Date_dt'] = pd.to_datetime(hubspot_df['Expiration Date'])
-    hubspot_df['Start Date_dt'] = pd.to_datetime(hubspot_df['Start Date'])
-    hubspot_df['Days Until Expiration'] = (hubspot_df['Expiration Date_dt'] - today).dt.days
-    hubspot_df['Days Since Start'] = (today - hubspot_df['Start Date_dt']).dt.days
-    
-    # Initialize all tag columns as FALSE
-    hubspot_df['High-Value Customer'] = False
-    hubspot_df['Low-Value Customer'] = False
-    hubspot_df['Not Enrolled'] = False
-    hubspot_df['Active Membership'] = False
-    hubspot_df['Expiring Soon'] = False
-    hubspot_df['Recently Renewed'] = False
-    
-    # Apply tagging logic
-    for idx, row in hubspot_df.iterrows():
-        days_until_exp = row['Days Until Expiration']
-        days_since_start = row['Days Since Start']
-        total_value = row.get('Total Order Value', 0)
-        membership_status = str(row.get('Membership', '')).lower()
-        
-        # Check if expired or expiring within 30 days
-        is_expired_or_expiring = days_until_exp <= 30
-        
-        # High-Value Customer: expired/expiring within 30 days AND total order value > 500
-        if is_expired_or_expiring and total_value > 1000:
-            hubspot_df.at[idx, 'High-Value Customer'] = True
-        
-        # Low-Value Customer: expired/expiring within 30 days AND total order value <= 500
-        if is_expired_or_expiring and total_value <= 1000:
-            hubspot_df.at[idx, 'Low-Value Customer'] = True
-        
-        # Not Enrolled: membership status is "Not Enrolled"
-        if 'not enrolled' in membership_status:
-            hubspot_df.at[idx, 'Not Enrolled'] = True
-        
-        # Active Membership: active and NOT expiring within 30 days
-        if days_until_exp > 30:
-            hubspot_df.at[idx, 'Active Membership'] = True
-        
-        # Expiring Soon: expiring within 30 days (but not expired)
-        if 0 <= days_until_exp <= 30:
-            hubspot_df.at[idx, 'Expiring Soon'] = True
-        
-        # Recently Renewed: start date within last 30 days
-        if days_since_start <= 30:
-            hubspot_df.at[idx, 'Recently Renewed'] = True
-    
-    # Clean up temporary columns
-    hubspot_df = hubspot_df.drop(['Expiration Date_dt', 'Start Date_dt', 'Days Until Expiration', 'Days Since Start'], axis=1)
-    
-    return hubspot_df
+    return df_sorted
 
 def deduplicate_memberships(df):
     """
     Deduplicate customer memberships based on renewal logic.
-    
+
     Args:
         df: DataFrame with customer membership data
-        
+
     Returns:
         DataFrame with deduplicated memberships
     """
@@ -203,55 +126,180 @@ def deduplicate_memberships(df):
     for col in required_columns:
         if col not in df.columns:
             raise ValueError(f"Required column '{col}' not found in the data")
-    
+
     # Convert date columns to datetime
     df['Created Date'] = pd.to_datetime(df['Created Date'])
     df['Expiration Date'] = pd.to_datetime(df['Expiration Date'])
-    
+
     # Sort by Customer Name and Created Date (oldest to newest)
     df_sorted = df.sort_values(['Customer Name', 'Created Date'], ascending=[True, True])
-    
+
     # Group by Customer Name
     grouped = df_sorted.groupby('Customer Name')
-    
+
     deduplicated_records = []
-    
+
     for customer_name, group in grouped:
         group_list = group.to_dict('records')
-        
+
         if len(group_list) == 1:
             # Single record for this customer, keep it
             deduplicated_records.extend(group_list)
             continue
-        
+
         # Process multiple records for the same customer
         keep_records = []
-        
+
         for i in range(len(group_list)):
             current_record = group_list[i]
             should_keep = True
-            
+
             # Check if the next record is a renewal within 7 days
             if i < len(group_list) - 1:
                 next_record = group_list[i + 1]
-                
+
                 # Calculate days between current expiration and next creation
                 days_diff = (next_record['Created Date'] - current_record['Expiration Date']).days
-                
+
                 # If next record starts within 7 days after current expires, it's a renewal
                 if days_diff <= 7:
                     should_keep = False  # Remove the older record
-            
+
             if should_keep:
                 keep_records.append(current_record)
-        
+
         deduplicated_records.extend(keep_records)
-    
+
     # Convert back to DataFrame and sort by Customer Name
     result_df = pd.DataFrame(deduplicated_records)
     result_df = result_df.sort_values('Customer Name')
-    
+
     return result_df
+
+def format_for_hubspot_export(df):
+    """
+    Format the dataframe for HubSpot export by creating a single multi-select tag column,
+    and including 'Customer Name' and 'Contact Email'.
+
+    Args:
+        df: DataFrame with processed membership data.
+            Assumes 'Created Date' is the Membership Renewal Date.
+            Assumes 'Customer Name' and 'Contact Email' are present in the input df.
+
+    Returns:
+        DataFrame formatted for HubSpot with a new multi-select column.
+    """
+    hubspot_df = df.copy()
+
+    # Ensure date columns are in datetime format for calculations
+    # Use errors='coerce' to turn unparseable dates into NaT
+    if 'Created Date' in hubspot_df.columns:
+        hubspot_df['Created Date'] = pd.to_datetime(hubspot_df['Created Date'], errors='coerce')
+        hubspot_df = hubspot_df.rename(columns={'Created Date': 'Start Date'})
+
+    if 'Expiration Date' in hubspot_df.columns:
+        hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce')
+
+    # Convert to datetime.date objects for precise comparison (removes time component)
+    # Use .mask to handle NaT values after .dt.date
+    hubspot_df['Expiration Date_dt'] = hubspot_df['Expiration Date'].dt.date.mask(pd.isna(hubspot_df['Expiration Date']))
+    hubspot_df['Start Date_dt'] = hubspot_df['Start Date'].dt.date.mask(pd.isna(hubspot_df['Start Date']))
+
+    # Get today's date (date only)
+    today = datetime.now().date()
+
+    # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
+    total_value_series = pd.to_numeric(hubspot_df.get('Total Order Value', pd.Series(0, index=hubspot_df.index)), errors='coerce').fillna(0)
+
+    # Create a list column to hold tags for each row
+    hubspot_df['Membership Status Tags List'] = [[] for _ in range(len(hubspot_df))]
+
+    # --- Apply Tagging Logic and populate the list ---
+
+    for idx, row in hubspot_df.iterrows():
+        current_tags = []
+
+        # High-Value Customer
+        if total_value_series.iloc[idx] > 1000:
+            current_tags.append('High-Value Customer')
+        else:
+            current_tags.append('Not High-Value Customer') # Explicitly add false state
+
+        start_date = row['Start Date_dt']
+        expiration_date = row['Expiration Date_dt']
+
+        # Ensure key dates are valid for date-based calculations
+        if pd.notna(start_date) and pd.notna(expiration_date):
+            # Active Membership
+            if (today >= start_date) and (today < expiration_date):
+                current_tags.append('Active Membership')
+            else:
+                current_tags.append('Not Active Membership') # Explicitly add false state
+
+            # Days until expiration (handle NaT)
+            days_until_expiration = (expiration_date - today).days if pd.notna(expiration_date) else None
+
+            # Expiring Soon
+            if (days_until_expiration is not None) and (0 <= days_until_expiration <= 30):
+                current_tags.append('Expiring Soon')
+            else:
+                current_tags.append('Not Expiring Soon') # Explicitly add false state
+
+            # Days since start (handle NaT)
+            days_since_start = (today - start_date).days if pd.notna(start_date) else None
+
+            # Recently Renewed
+            if (days_since_start is not None) and (0 <= days_since_start <= 30):
+                current_tags.append('Recently Renewed')
+            else:
+                current_tags.append('Not Recently Renewed') # Explicitly add false state
+        else:
+            # If dates are missing, explicitly tag as such or apply default 'false' states
+            current_tags.append('Not Active Membership')
+            current_tags.append('Not Expiring Soon')
+            current_tags.append('Not Recently Renewed')
+
+        hubspot_df.at[idx, 'Membership Status Tags List'] = current_tags
+
+    # Join the lists into a semicolon-separated string for the final column
+    hubspot_df['Membership Status Tags'] = hubspot_df['Membership Status Tags List'].apply(lambda x: ';'.join(x))
+
+    # --- Clean up temporary columns ---
+
+    # Drop the temporary datetime objects used for calculations and the intermediate list column
+    hubspot_df = hubspot_df.drop(['Expiration Date_dt', 'Start Date_dt', 'Membership Status Tags List'], axis=1)
+
+    # Drop the 'Expiration Category' if it exists, as new multi-select column is desired
+    if 'Expiration Category' in hubspot_df.columns:
+        hubspot_df = hubspot_df.drop('Expiration Category', axis=1)
+
+    # Convert the actual 'Start Date' and 'Expiration Date' columns to the desired string format *here*
+    # This ensures they are in string format for the final CSV export, after all calculations.
+    # Use fillna('') to replace any NaT values with empty strings in the output
+    if 'Start Date' in hubspot_df.columns:
+        hubspot_df['Start Date'] = pd.to_datetime(hubspot_df['Start Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
+    if 'Expiration Date' in hubspot_df.columns:
+        hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
+
+    # Reorder columns to place Customer Name, Contact Email, and the new tag column at the beginning,
+    # followed by other relevant columns.
+    desired_order = [
+        'Customer Name',
+        'Contact Email', # Assuming 'Contact Email' is the column name in your data
+        'Membership Status Tags'
+    ]
+
+    # Get existing columns not in the desired order
+    other_columns = [col for col in hubspot_df.columns if col not in desired_order]
+
+    # Filter desired_order to only include columns that actually exist in the DataFrame
+    existing_desired_order = [col for col in desired_order if col in hubspot_df.columns]
+
+    # Combine existing desired columns with other columns that are not tags
+    hubspot_df = hubspot_df[existing_desired_order + other_columns]
+
+    return hubspot_df
+
 
 @app.route('/')
 def upload_file():
@@ -263,40 +311,37 @@ def process_file():
     if 'membership_file' not in request.files or 'orders_file' not in request.files:
         flash('Both membership and orders files are required')
         return redirect(request.url)
-    
+
     membership_file = request.files['membership_file']
     orders_file = request.files['orders_file']
-    
+
     if membership_file.filename == '' or orders_file.filename == '':
         flash('Both files must be selected')
         return redirect(request.url)
-    
+
     # Get export format
     export_format = request.form.get('export_format', 'standard')
-    
+
     if (membership_file and allowed_file(membership_file.filename) and 
         orders_file and allowed_file(orders_file.filename)):
         try:
             # Read both Excel files
             membership_df = pd.read_excel(membership_file)
             orders_df = pd.read_excel(orders_file)
-            
+
             # Show preview of original data
             original_count = len(membership_df)
-            
+
             # Perform deduplication on membership data
             deduplicated_df = deduplicate_memberships(membership_df)
             deduplicated_count = len(deduplicated_df)
-            
+
             # Process orders and add value tiers
             processed_df = process_orders_and_add_value_tiers(deduplicated_df, orders_df)
-            
-            # Categorize and sort by expiration status
+
+            # Categorize and sort by expiration status (this adds 'Expiration Category')
             final_df = categorize_and_sort_memberships(processed_df)
-            
-            # Remove any completely empty columns
-            final_df = final_df.dropna(axis=1, how='all')
-            
+
             # Apply HubSpot formatting if selected
             if export_format == 'hubspot':
                 final_df = format_for_hubspot_export(final_df)
@@ -307,25 +352,25 @@ def process_file():
             else:
                 file_extension = 'xlsx'
                 output_filename = f"processed_{secure_filename(membership_file.filename)}"
-            
+
             # Save the processed file to a temporary location
             temp_dir = tempfile.gettempdir()
             output_path = os.path.join(temp_dir, output_filename)
-            
+
             if file_extension == 'csv':
                 final_df.to_csv(output_path, index=False)
             else:
                 with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                     final_df.to_excel(writer, index=False, sheet_name='Processed_Data')
-            
+
             return render_template('results.html', 
-                                 original_count=original_count,
-                                 deduplicated_count=deduplicated_count,
-                                 reduction=original_count - deduplicated_count,
-                                 filename=output_filename,
-                                 export_format=export_format,
-                                 preview_data=final_df.head(10).to_html(classes='table table-striped', index=False))
-            
+                                   original_count=original_count,
+                                   deduplicated_count=deduplicated_count,
+                                   reduction=original_count - deduplicated_count,
+                                   filename=output_filename,
+                                   export_format=export_format,
+                                   preview_data=final_df.head(10).to_html(classes='table table-striped', index=False))
+
         except Exception as e:
             flash(f'Error processing files: {str(e)}')
             return redirect(url_for('upload_file'))
@@ -337,7 +382,7 @@ def process_file():
 def download_file(filename):
     temp_dir = tempfile.gettempdir()
     file_path = os.path.join(temp_dir, filename)
-    
+
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True, download_name=filename)
     else:
