@@ -69,7 +69,7 @@ def categorize_and_sort_memberships(df):
     """
     Categorize memberships by expiration status and sort them.
     This function will continue to add 'Expiration Category' for internal use,
-    but it will be removed if the Excel export is chosen later in process_file.
+    but it will be removed or superseded by other flags in final outputs.
 
     Args:
         df: DataFrame with customer membership data
@@ -178,6 +178,62 @@ def deduplicate_memberships(df):
 
     return result_df
 
+def _calculate_all_membership_flags(df):
+    """
+    Helper function to calculate all boolean flags for membership status and value.
+    Returns a DataFrame with original columns + new boolean flag columns (prefixed with _is_).
+    """
+    flagged_df = df.copy()
+
+    # Ensure date columns are in datetime64[ns] format for consistent calculations
+    # Use errors='coerce' to turn unparseable dates into NaT
+    for col in ['Start Date', 'Expiration Date']:
+        if col in flagged_df.columns:
+            flagged_df[f'{col}_dt_ts'] = pd.to_datetime(flagged_df[col], errors='coerce')
+        else:
+            flagged_df[f'{col}_dt_ts'] = pd.Series([pd.NaT] * len(flagged_df), index=flagged_df.index)
+
+    # Use pandas Timestamp for 'today' for consistent comparisons with datetime64[ns] series
+    today_ts = pd.Timestamp.now().normalize()
+
+    # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
+    total_value_series = pd.to_numeric(flagged_df.get('Total Order Value', pd.Series(0, index=flagged_df.index)), errors='coerce').fillna(0)
+
+    # --- Calculate Flags ---
+
+    # High-Value Customer
+    flagged_df['_is_high_value'] = total_value_series > 1000
+
+    # Original Purchase Method (HFO Buy)
+    # Check if 'Original Pu' column exists and has non-empty/non-NaN values
+    if 'Original Pu' in flagged_df.columns:
+        flagged_df['_is_hfo_buy'] = flagged_df['Original Pu'].apply(lambda x: pd.notna(x) and str(x).strip() != '')
+    else:
+        flagged_df['_is_hfo_buy'] = False # Default to False if column doesn't exist
+
+    # Active Membership
+    # Condition: Today >= Start Date AND Today < Expiration Date
+    flagged_df['_is_active_membership'] = (today_ts >= flagged_df['Start Date_dt_ts']) & (today_ts < flagged_df['Expiration Date_dt_ts'])
+    flagged_df['_is_active_membership'] = flagged_df['_is_active_membership'].fillna(False) # Handle NaT from date comparisons
+
+    # Days until expiration calculation (difference between Timestamps yields Timedelta)
+    days_until_expiration = (flagged_df['Expiration Date_dt_ts'] - today_ts).dt.days
+
+    # Expiring Soon
+    # Condition: Days until expiration is between 0 and 30 (inclusive)
+    flagged_df['_is_expiring_soon'] = (days_until_expiration >= 0) & (days_until_expiration <= 30)
+    flagged_df['_is_expiring_soon'] = flagged_df['_is_expiring_soon'].fillna(False) # Handle NaT
+
+    # Days since start calculation
+    days_since_start = (today_ts - flagged_df['Start Date_dt_ts']).dt.days
+
+    # Recently Renewed
+    # Condition: Days since start is between 0 and 30 (inclusive)
+    flagged_df['_is_recently_renewed'] = (days_since_start >= 0) & (days_since_start <= 30)
+    flagged_df['_is_recently_renewed'] = flagged_df['_is_recently_renewed'].fillna(False) # Handle NaT
+
+    return flagged_df
+
 def add_individual_boolean_tags_for_excel(df):
     """
     Adds individual boolean columns for each tag status for Excel export.
@@ -185,66 +241,32 @@ def add_individual_boolean_tags_for_excel(df):
     """
     excel_df = df.copy()
 
-    # Ensure date columns are in datetime64[ns] format for consistent calculations
-    # Use errors='coerce' to turn unparseable dates into NaT
-    if 'Start Date' in excel_df.columns:
-        excel_df['Start Date_dt_ts'] = pd.to_datetime(excel_df['Start Date'], errors='coerce')
-    else:
-        excel_df['Start Date_dt_ts'] = pd.Series([pd.NaT] * len(excel_df), index=excel_df.index)
+    # Calculate all core boolean flags first
+    excel_df = _calculate_all_membership_flags(excel_df)
 
-    if 'Expiration Date' in excel_df.columns:
-        excel_df['Expiration Date_dt_ts'] = pd.to_datetime(excel_df['Expiration Date'], errors='coerce')
-    else:
-        excel_df['Expiration Date_dt_ts'] = pd.Series([pd.NaT] * len(excel_df), index=excel_df.index)
+    # --- Populate new boolean columns based on calculated flags ---
 
-    # Use pandas Timestamp for 'today' for consistent comparisons with datetime64[ns] series
-    today_ts = pd.Timestamp.now().normalize()
+    excel_df['High-Value Customer (True)'] = excel_df['_is_high_value']
+    excel_df['High-Value Customer (False)'] = ~excel_df['_is_high_value']
 
-    # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
-    total_value_series = pd.to_numeric(excel_df.get('Total Order Value', pd.Series(0, index=excel_df.index)), errors='coerce').fillna(0)
+    excel_df['HFO Buy (True)'] = excel_df['_is_hfo_buy']
+    excel_df['HFO Buy (False)'] = ~excel_df['_is_hfo_buy']
 
-    # --- Apply Tagging Logic and populate new boolean columns ---
+    excel_df['Active Membership (True)'] = excel_df['_is_active_membership']
+    excel_df['Active Membership (False)'] = ~excel_df['_is_active_membership']
 
-    # High-Value Customer
-    excel_df['High-Value Customer (True)'] = total_value_series > 1000
-    excel_df['High-Value Customer (False)'] = ~excel_df['High-Value Customer (True)']
+    excel_df['Expiring Soon (True)'] = excel_df['_is_expiring_soon']
+    excel_df['Expiring Soon (False)'] = ~excel_df['_is_expiring_soon']
 
-    # Original Purchase Method (HFO Buy / Not HFO Buy)
-    # Check if 'Original Pu' column exists and has non-empty/non-NaN values
-    if 'Original Pu' in excel_df.columns:
-        excel_df['HFO Buy (True)'] = excel_df['Original Pu'].apply(lambda x: pd.notna(x) and str(x).strip() != '')
-    else:
-        excel_df['HFO Buy (True)'] = False # Default to False if column doesn't exist
-    excel_df['HFO Buy (False)'] = ~excel_df['HFO Buy (True)']
+    excel_df['Recently Renewed (True)'] = excel_df['_is_recently_renewed']
+    excel_df['Recently Renewed (False)'] = ~excel_df['_is_recently_renewed']
 
-
-    # Active Membership
-    # Condition: Today >= Start Date AND Today < Expiration Date
-    # Comparisons are now between Timestamp objects or Timestamp series
-    excel_df['Active Membership (True)'] = (today_ts >= excel_df['Start Date_dt_ts']) & (today_ts < excel_df['Expiration Date_dt_ts'])
-    excel_df['Active Membership (True)'] = excel_df['Active Membership (True)'].fillna(False) # Handle NaT from date comparisons
-    excel_df['Active Membership (False)'] = ~excel_df['Active Membership (True)']
-
-    # Days until expiration calculation (difference between Timestamps yields Timedelta)
-    days_until_expiration = (excel_df['Expiration Date_dt_ts'] - today_ts).dt.days # .dt.days on Timedelta Series
-
-    # Expiring Soon
-    # Condition: Days until expiration is between 0 and 30 (inclusive)
-    excel_df['Expiring Soon (True)'] = (days_until_expiration >= 0) & (days_until_expiration <= 30)
-    excel_df['Expiring Soon (True)'] = excel_df['Expiring Soon (True)'].fillna(False) # Handle NaT
-    excel_df['Expiring Soon (False)'] = ~excel_df['Expiring Soon (True)']
-
-    # Days since start calculation
-    days_since_start = (today_ts - excel_df['Start Date_dt_ts']).dt.days # .dt.days on Timedelta Series
-
-    # Recently Renewed
-    # Condition: Days since start is between 0 and 30 (inclusive)
-    excel_df['Recently Renewed (True)'] = (days_since_start >= 0) & (days_since_start <= 30)
-    excel_df['Recently Renewed (True)'] = excel_df['Recently Renewed (True)'].fillna(False) # Handle NaT
-    excel_df['Recently Renewed (False)'] = ~excel_df['Recently Renewed (True)']
-
-    # Drop temporary datetime columns
-    excel_df = excel_df.drop(columns=['Start Date_dt_ts', 'Expiration Date_dt_ts'], errors='ignore')
+    # Drop temporary datetime columns and the intermediate flag columns
+    excel_df = excel_df.drop(columns=[
+        'Start Date_dt_ts', 'Expiration Date_dt_ts',
+        '_is_high_value', '_is_hfo_buy', '_is_active_membership',
+        '_is_expiring_soon', '_is_recently_renewed'
+    ], errors='ignore')
 
     # Remove 'Expiration Category' if it exists, as it's replaced by detailed booleans
     if 'Expiration Category' in excel_df.columns:
@@ -255,95 +277,68 @@ def add_individual_boolean_tags_for_excel(df):
 
 def format_for_hubspot_export(df):
     """
-    Format the dataframe for HubSpot export by creating a single multi-select tag column,
+    Formats the dataframe for HubSpot export by creating a single multi-select tag column,
     including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings',
     and removing specified columns.
 
     Args:
         df: DataFrame with processed membership data.
-            Assumes 'Created Date' is the Membership Renewal Date.
-            Assumes 'Customer Name' and 'Contact Email' are present in the input df.
 
     Returns:
         DataFrame formatted for HubSpot with a new multi-select column.
     """
     hubspot_df = df.copy()
 
-    # Ensure date columns are in datetime format for calculations
-    # Use errors='coerce' to turn unparseable dates into NaT
+    # Format dates to YYYY-MM-DD string format for HubSpot compatibility
+    # Do this BEFORE calling _calculate_all_membership_flags if those dates are needed
+    # for the helper function. The helper creates its own _dt_ts versions.
     if 'Created Date' in hubspot_df.columns:
-        hubspot_df['Created Date'] = pd.to_datetime(hubspot_df['Created Date'], errors='coerce')
+        hubspot_df['Created Date'] = pd.to_datetime(hubspot_df['Created Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
         hubspot_df = hubspot_df.rename(columns={'Created Date': 'Start Date'})
 
     if 'Expiration Date' in hubspot_df.columns:
-        hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce')
+        hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
 
-    # Convert to datetime.date objects for precise comparison (removes time component)
-    # Use .mask to handle NaT values after .dt.date
-    hubspot_df['Expiration Date_dt'] = hubspot_df['Expiration Date'].dt.date.mask(pd.isna(hubspot_df['Expiration Date']))
-    hubspot_df['Start Date_dt'] = hubspot_df['Start Date'].dt.date.mask(pd.isna(hubspot_df['Start Date']))
-
-    # Get today's date (date only)
-    today = datetime.now().date()
-
-    # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
-    total_value_series = pd.to_numeric(hubspot_df.get('Total Order Value', pd.Series(0, index=hubspot_df.index)), errors='coerce').fillna(0)
+    # Calculate all core boolean flags first
+    hubspot_df = _calculate_all_membership_flags(hubspot_df)
 
     # Create a list column to hold tags for each row
     hubspot_df['Membership Status Tags List'] = [[] for _ in range(len(hubspot_df))]
 
-    # --- Apply Tagging Logic and populate the list ---
+    # --- Populate the list based on calculated flags ---
 
     for idx, row in hubspot_df.iterrows():
         current_tags = []
 
         # High-Value Customer
-        if total_value_series.iloc[idx] > 1000:
+        if row['_is_high_value']:
             current_tags.append('High-Value Customer')
         else:
-            current_tags.append('Not High-Value Customer') # Explicitly add false state
-
-        start_date = row['Start Date_dt']
-        expiration_date = row['Expiration Date_dt']
+            current_tags.append('Not High-Value Customer') 
 
         # Original Purchase Method (HFO Buy / Not HFO Buy)
-        # Assuming 'Original Pu' is the column name for Original Purchase Method
-        original_purchase_method = row.get('Original Pu') 
-        if pd.notna(original_purchase_method) and str(original_purchase_method).strip() != '':
+        if row['_is_hfo_buy']:
             current_tags.append('HFO Buy')
         else:
             current_tags.append('Not HFO Buy')
 
-        # Ensure key dates are valid for date-based calculations
-        if pd.notna(start_date) and pd.notna(expiration_date):
-            # Active Membership
-            if (today >= start_date) and (today < expiration_date):
-                current_tags.append('Active Membership')
-            else:
-                current_tags.append('Not Active Membership') # Explicitly add false state
-
-            # Days until expiration (handle NaT)
-            days_until_expiration_val = (expiration_date - today).days if pd.notna(expiration_date) else None
-
-            # Expiring Soon
-            if (days_until_expiration_val is not None) and (0 <= days_until_expiration_val <= 30):
-                current_tags.append('Expiring Soon')
-            else:
-                current_tags.append('Not Expiring Soon') # Explicitly add false state
-
-            # Days since start (handle NaT)
-            days_since_start_val = (today - start_date).days if pd.notna(start_date) else None
-
-            # Recently Renewed
-            if (days_since_start_val is not None) and (0 <= days_since_start_val <= 30):
-                current_tags.append('Recently Renewed')
-            else:
-                current_tags.append('Not Recently Renewed') # Explicitly add false state
+        # Active Membership
+        if row['_is_active_membership']:
+            current_tags.append('Active Membership')
         else:
-            # If dates are missing (NaT), explicitly tag as 'Not Active', 'Not Expiring Soon', 'Not Recently Renewed'
-            current_tags.append('Not Active Membership')
-            current_tags.append('Not Expiring Soon')
-            current_tags.append('Not Recently Renewed')
+            current_tags.append('Not Active Membership') 
+
+        # Expiring Soon
+        if row['_is_expiring_soon']:
+            current_tags.append('Expiring Soon')
+        else:
+            current_tags.append('Not Expiring Soon') 
+
+        # Recently Renewed
+        if row['_is_recently_renewed']:
+            current_tags.append('Recently Renewed')
+        else:
+            current_tags.append('Not Recently Renewed') 
 
         hubspot_df.at[idx, 'Membership Status Tags List'] = current_tags
 
@@ -353,21 +348,18 @@ def format_for_hubspot_export(df):
     # --- Clean up temporary columns ---
 
     # Drop the temporary datetime objects used for calculations and the intermediate list column
-    hubspot_df = hubspot_df.drop(['Expiration Date_dt', 'Start Date_dt', 'Membership Status Tags List'], axis=1)
+    hubspot_df = hubspot_df.drop(columns=[
+        'Start Date_dt_ts', 'Expiration Date_dt_ts', # From _calculate_all_membership_flags
+        'Membership Status Tags List', 
+        '_is_high_value', '_is_hfo_buy', '_is_active_membership', # The boolean flags themselves
+        '_is_expiring_soon', '_is_recently_renewed'
+    ], errors='ignore')
 
-    # Drop the 'Expiration Category' if it exists, as new multi-select column is desired
+    # Drop the 'Expiration Category' if it exists
     if 'Expiration Category' in hubspot_df.columns:
         hubspot_df = hubspot_df.drop('Expiration Category', axis=1)
 
-    # Convert the actual 'Start Date' and 'Expiration Date' columns to the desired string format *here*
-    # This ensures they are in string format for the final CSV export, after all calculations.
-    # Use fillna('') to replace any NaT values with empty strings in the output
-    if 'Start Date' in hubspot_df.columns:
-        hubspot_df['Start Date'] = pd.to_datetime(hubspot_df['Start Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
-    if 'Expiration Date' in hubspot_df.columns:
-        hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
-
-    # --- Columns to remove from HubSpot output ---
+    # --- Columns to remove from HubSpot output explicitly ---
     columns_to_remove_from_hubspot_output = [
         'Cust ID',      # Original Customer ID
         'City',
@@ -379,8 +371,8 @@ def format_for_hubspot_export(df):
         'Contact ID',
         'Contact Ni',   # Contact Nickname
         'Contact Pr',   # Contact Property/Phone
-        # 'Start Date', # Keep these for Excel if needed
-        # 'Expiration Date', # Keep these for Excel if needed
+        'Start Date',   # Explicitly removing if you only want the tags for dates
+        'Expiration Date' # Explicitly removing if you only want the tags for dates
     ]
 
     # Drop columns if they exist in the DataFrame
