@@ -179,7 +179,8 @@ def deduplicate_memberships(df):
 def format_for_hubspot_export(df):
     """
     Format the dataframe for HubSpot export by creating a single multi-select tag column,
-    and including 'Customer Name' and 'Contact Email', and removing specified columns.
+    including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings',
+    and removing specified columns.
 
     Args:
         df: DataFrame with processed membership data.
@@ -227,6 +228,14 @@ def format_for_hubspot_export(df):
 
         start_date = row['Start Date_dt']
         expiration_date = row['Expiration Date_dt']
+
+        # Original Purchase Method (HFO Buy / Not HFO Buy)
+        # Assuming 'Original Pu' is the column name for Original Purchase Method
+        original_purchase_method = row.get('Original Pu') 
+        if pd.notna(original_purchase_method) and str(original_purchase_method).strip() != '':
+            current_tags.append('HFO Buy')
+        else:
+            current_tags.append('Not HFO Buy')
 
         # Ensure key dates are valid for date-based calculations
         if pd.notna(start_date) and pd.notna(expiration_date):
@@ -288,11 +297,14 @@ def format_for_hubspot_export(df):
         'State/Regi',   # State/Region
         'Membersh',     # Original Membership field
         'Sales Doc',
-        'Original Pu',  # Original Purchase
+        'Original Pu',  # Original Purchase (now part of tags, so remove column)
         'HFO',
         'Contact ID',
         'Contact Ni',   # Contact Nickname
-        'Contact Pr'    # Contact Property/Phone
+        'Contact Pr',   # Contact Property/Phone
+        # Also remove 'Start Date' and 'Expiration Date' if they are not desired as separate columns,
+        # but you specified keeping them indirectly through the final desired output.
+        # Keeping Start Date and Expiration Date as per your new desired list.
     ]
 
     # Drop columns if they exist in the DataFrame
@@ -300,23 +312,18 @@ def format_for_hubspot_export(df):
         if col in hubspot_df.columns:
             hubspot_df = hubspot_df.drop(col, axis=1)
 
-
-    # Reorder columns to place Customer Name, Contact Email, and the new tag column at the beginning,
-    # followed by other relevant columns (like Start Date, Expiration Date, Total Order Value, Estimated Savings).
-    desired_order = [
+    # Define the exact final columns and their order for HubSpot output
+    final_hubspot_columns = [
         'Customer Name',
-        'Contact Email', 
-        'Membership Status Tags'
+        'Contact Email',
+        'Membership Status Tags',
+        'Total Order Value',
+        'Estimated Savings'
     ]
 
-    # Get remaining columns that are not in the top desired_order
-    other_columns = [col for col in hubspot_df.columns if col not in desired_order]
-
-    # Filter desired_order to only include columns that actually exist in the DataFrame
-    existing_desired_order = [col for col in desired_order if col in hubspot_df.columns]
-
-    # Combine existing desired columns with other remaining columns
-    hubspot_df = hubspot_df[existing_desired_order + other_columns]
+    # Filter to only keep the final desired columns and ensure their order
+    # This will also drop any other columns not explicitly listed here.
+    hubspot_df = hubspot_df[[col for col in final_hubspot_columns if col in hubspot_df.columns]]
 
     return hubspot_df
 
