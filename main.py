@@ -179,7 +179,7 @@ def deduplicate_memberships(df):
 def format_for_hubspot_export(df):
     """
     Format the dataframe for HubSpot export by creating a single multi-select tag column,
-    and including 'Customer Name' and 'Contact Email'.
+    and including 'Customer Name' and 'Contact Email', and removing specified columns.
 
     Args:
         df: DataFrame with processed membership data.
@@ -237,24 +237,24 @@ def format_for_hubspot_export(df):
                 current_tags.append('Not Active Membership') # Explicitly add false state
 
             # Days until expiration (handle NaT)
-            days_until_expiration = (expiration_date - today).days if pd.notna(expiration_date) else None
+            days_until_expiration_val = (expiration_date - today).days if pd.notna(expiration_date) else None
 
             # Expiring Soon
-            if (days_until_expiration is not None) and (0 <= days_until_expiration <= 30):
+            if (days_until_expiration_val is not None) and (0 <= days_until_expiration_val <= 30):
                 current_tags.append('Expiring Soon')
             else:
                 current_tags.append('Not Expiring Soon') # Explicitly add false state
 
             # Days since start (handle NaT)
-            days_since_start = (today - start_date).days if pd.notna(start_date) else None
+            days_since_start_val = (today - start_date).days if pd.notna(start_date) else None
 
             # Recently Renewed
-            if (days_since_start is not None) and (0 <= days_since_start <= 30):
+            if (days_since_start_val is not None) and (0 <= days_since_start_val <= 30):
                 current_tags.append('Recently Renewed')
             else:
                 current_tags.append('Not Recently Renewed') # Explicitly add false state
         else:
-            # If dates are missing, explicitly tag as such or apply default 'false' states
+            # If dates are missing (NaT), explicitly tag as 'Not Active', 'Not Expiring Soon', 'Not Recently Renewed'
             current_tags.append('Not Active Membership')
             current_tags.append('Not Expiring Soon')
             current_tags.append('Not Recently Renewed')
@@ -281,21 +281,41 @@ def format_for_hubspot_export(df):
     if 'Expiration Date' in hubspot_df.columns:
         hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
 
+    # --- Columns to remove from HubSpot output ---
+    columns_to_remove_from_hubspot_output = [
+        'Cust ID',      # Original Customer ID
+        'City',
+        'State/Regi',   # State/Region
+        'Membersh',     # Original Membership field
+        'Sales Doc',
+        'Original Pu',  # Original Purchase
+        'HFO',
+        'Contact ID',
+        'Contact Ni',   # Contact Nickname
+        'Contact Pr'    # Contact Property/Phone
+    ]
+
+    # Drop columns if they exist in the DataFrame
+    for col in columns_to_remove_from_hubspot_output:
+        if col in hubspot_df.columns:
+            hubspot_df = hubspot_df.drop(col, axis=1)
+
+
     # Reorder columns to place Customer Name, Contact Email, and the new tag column at the beginning,
-    # followed by other relevant columns.
+    # followed by other relevant columns (like Start Date, Expiration Date, Total Order Value, Estimated Savings).
     desired_order = [
         'Customer Name',
-        'Contact Email', # Assuming 'Contact Email' is the column name in your data
+        'Contact Email', 
         'Membership Status Tags'
     ]
 
-    # Get existing columns not in the desired order
+    # Get remaining columns that are not in the top desired_order
     other_columns = [col for col in hubspot_df.columns if col not in desired_order]
 
     # Filter desired_order to only include columns that actually exist in the DataFrame
     existing_desired_order = [col for col in desired_order if col in hubspot_df.columns]
 
-    # Combine existing desired columns with other columns that are not tags
+    # Combine existing desired columns with other remaining columns
     hubspot_df = hubspot_df[existing_desired_order + other_columns]
 
     return hubspot_df
