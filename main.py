@@ -68,6 +68,8 @@ def process_orders_and_add_value_tiers(membership_df, orders_df):
 def categorize_and_sort_memberships(df):
     """
     Categorize memberships by expiration status and sort them.
+    This function will continue to add 'Expiration Category' for internal use,
+    but it will be removed if the Excel export is chosen later in process_file.
 
     Args:
         df: DataFrame with customer membership data
@@ -175,6 +177,81 @@ def deduplicate_memberships(df):
     result_df = result_df.sort_values('Customer Name')
 
     return result_df
+
+def add_individual_boolean_tags_for_excel(df):
+    """
+    Adds individual boolean columns for each tag status for Excel export.
+    Outputs as True/False booleans (actual Python booleans, which pandas will write as TRUE/FALSE).
+    """
+    excel_df = df.copy()
+
+    # Ensure date columns are in datetime64[ns] format for consistent calculations
+    # Use errors='coerce' to turn unparseable dates into NaT
+    if 'Start Date' in excel_df.columns:
+        excel_df['Start Date_dt_ts'] = pd.to_datetime(excel_df['Start Date'], errors='coerce')
+    else:
+        excel_df['Start Date_dt_ts'] = pd.Series([pd.NaT] * len(excel_df), index=excel_df.index)
+
+    if 'Expiration Date' in excel_df.columns:
+        excel_df['Expiration Date_dt_ts'] = pd.to_datetime(excel_df['Expiration Date'], errors='coerce')
+    else:
+        excel_df['Expiration Date_dt_ts'] = pd.Series([pd.NaT] * len(excel_df), index=excel_df.index)
+
+    # Use pandas Timestamp for 'today' for consistent comparisons with datetime64[ns] series
+    today_ts = pd.Timestamp.now().normalize()
+
+    # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
+    total_value_series = pd.to_numeric(excel_df.get('Total Order Value', pd.Series(0, index=excel_df.index)), errors='coerce').fillna(0)
+
+    # --- Apply Tagging Logic and populate new boolean columns ---
+
+    # High-Value Customer
+    excel_df['High-Value Customer (True)'] = total_value_series > 1000
+    excel_df['High-Value Customer (False)'] = ~excel_df['High-Value Customer (True)']
+
+    # Original Purchase Method (HFO Buy / Not HFO Buy)
+    # Check if 'Original Pu' column exists and has non-empty/non-NaN values
+    if 'Original Pu' in excel_df.columns:
+        excel_df['HFO Buy (True)'] = excel_df['Original Pu'].apply(lambda x: pd.notna(x) and str(x).strip() != '')
+    else:
+        excel_df['HFO Buy (True)'] = False # Default to False if column doesn't exist
+    excel_df['HFO Buy (False)'] = ~excel_df['HFO Buy (True)']
+
+
+    # Active Membership
+    # Condition: Today >= Start Date AND Today < Expiration Date
+    # Comparisons are now between Timestamp objects or Timestamp series
+    excel_df['Active Membership (True)'] = (today_ts >= excel_df['Start Date_dt_ts']) & (today_ts < excel_df['Expiration Date_dt_ts'])
+    excel_df['Active Membership (True)'] = excel_df['Active Membership (True)'].fillna(False) # Handle NaT from date comparisons
+    excel_df['Active Membership (False)'] = ~excel_df['Active Membership (True)']
+
+    # Days until expiration calculation (difference between Timestamps yields Timedelta)
+    days_until_expiration = (excel_df['Expiration Date_dt_ts'] - today_ts).dt.days # .dt.days on Timedelta Series
+
+    # Expiring Soon
+    # Condition: Days until expiration is between 0 and 30 (inclusive)
+    excel_df['Expiring Soon (True)'] = (days_until_expiration >= 0) & (days_until_expiration <= 30)
+    excel_df['Expiring Soon (True)'] = excel_df['Expiring Soon (True)'].fillna(False) # Handle NaT
+    excel_df['Expiring Soon (False)'] = ~excel_df['Expiring Soon (True)']
+
+    # Days since start calculation
+    days_since_start = (today_ts - excel_df['Start Date_dt_ts']).dt.days # .dt.days on Timedelta Series
+
+    # Recently Renewed
+    # Condition: Days since start is between 0 and 30 (inclusive)
+    excel_df['Recently Renewed (True)'] = (days_since_start >= 0) & (days_since_start <= 30)
+    excel_df['Recently Renewed (True)'] = excel_df['Recently Renewed (True)'].fillna(False) # Handle NaT
+    excel_df['Recently Renewed (False)'] = ~excel_df['Recently Renewed (True)']
+
+    # Drop temporary datetime columns
+    excel_df = excel_df.drop(columns=['Start Date_dt_ts', 'Expiration Date_dt_ts'], errors='ignore')
+
+    # Remove 'Expiration Category' if it exists, as it's replaced by detailed booleans
+    if 'Expiration Category' in excel_df.columns:
+        excel_df = excel_df.drop('Expiration Category', axis=1)
+
+    return excel_df
+
 
 def format_for_hubspot_export(df):
     """
@@ -302,9 +379,8 @@ def format_for_hubspot_export(df):
         'Contact ID',
         'Contact Ni',   # Contact Nickname
         'Contact Pr',   # Contact Property/Phone
-        # Also remove 'Start Date' and 'Expiration Date' if they are not desired as separate columns,
-        # but you specified keeping them indirectly through the final desired output.
-        # Keeping Start Date and Expiration Date as per your new desired list.
+        # 'Start Date', # Keep these for Excel if needed
+        # 'Expiration Date', # Keep these for Excel if needed
     ]
 
     # Drop columns if they exist in the DataFrame
@@ -367,6 +443,7 @@ def process_file():
             processed_df = process_orders_and_add_value_tiers(deduplicated_df, orders_df)
 
             # Categorize and sort by expiration status (this adds 'Expiration Category')
+            # This step is kept as it might be used internally or for other non-HubSpot exports
             final_df = categorize_and_sort_memberships(processed_df)
 
             # Apply HubSpot formatting if selected
@@ -376,7 +453,12 @@ def process_file():
                 final_df = final_df.dropna(axis=1, how='all')
                 file_extension = 'csv'
                 output_filename = f"hubspot_{secure_filename(membership_file.filename).rsplit('.', 1)[0]}.csv"
-            else:
+            else: # Standard Excel output
+                # Add individual boolean tag columns for Excel verification
+                final_df = add_individual_boolean_tags_for_excel(final_df)
+                # Remove any columns that are now redundant or not desired in the Excel output
+                # (e.g., Expiration Category if it exists and is now redundant)
+                final_df = final_df.dropna(axis=1, how='all') 
                 file_extension = 'xlsx'
                 output_filename = f"processed_{secure_filename(membership_file.filename)}"
 
