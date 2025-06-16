@@ -115,68 +115,47 @@ def categorize_and_sort_memberships(df):
 
 def deduplicate_memberships(df):
     """
-    Deduplicate customer memberships based on renewal logic.
+    Deduplicate customer memberships by keeping the most recent (latest Expiration Date, then latest Created Date)
+    record for each unique customer. This handles renewal scenarios where an older 'Expired' record
+    might exist alongside a newer 'Active' record.
 
     Args:
-        df: DataFrame with customer membership data
+        df: DataFrame with customer membership data. Must contain 'Customer Name', 'Created Date', 'Expiration Date'.
 
     Returns:
-        DataFrame with deduplicated memberships
+        DataFrame with deduplicated memberships.
     """
     # Ensure we have the required columns
     required_columns = ['Customer Name', 'Created Date', 'Expiration Date']
     for col in required_columns:
         if col not in df.columns:
-            raise ValueError(f"Required column '{col}' not found in the data")
+            raise ValueError(f"Required column '{col}' not found in the data for deduplication.")
 
-    # Convert date columns to datetime
-    df['Created Date'] = pd.to_datetime(df['Created Date'])
-    df['Expiration Date'] = pd.to_datetime(df['Expiration Date'])
+    # Convert date columns to datetime, coercing errors to NaT
+    df['Created Date'] = pd.to_datetime(df['Created Date'], errors='coerce')
+    df['Expiration Date'] = pd.to_datetime(df['Expiration Date'], errors='coerce')
 
-    # Sort by Customer Name and Created Date (oldest to newest)
-    df_sorted = df.sort_values(['Customer Name', 'Created Date'], ascending=[True, True])
+    # Drop rows where essential columns for deduplication are NaT after conversion
+    df.dropna(subset=['Customer Name', 'Created Date', 'Expiration Date'], inplace=True)
 
-    # Group by Customer Name
-    grouped = df_sorted.groupby('Customer Name')
+    # Sort by Customer Name, then by Expiration Date (descending - latest first),
+    # then by Created Date (descending - most recent first as a tie-breaker).
+    # This ensures that for each customer, the record with the furthest expiration
+    # date is prioritized, and among those, the one with the most recent creation date.
+    df_sorted = df.sort_values(
+        by=['Customer Name', 'Expiration Date', 'Created Date'],
+        ascending=[True, False, False]
+    )
 
-    deduplicated_records = []
+    # Drop duplicates, keeping the first occurrence (which is now the most recent/relevant record due to sorting)
+    # The subset should be the unique identifier for a customer.
+    deduplicated_df = df_sorted.drop_duplicates(subset=['Customer Name'], keep='first')
 
-    for customer_name, group in grouped:
-        group_list = group.to_dict('records')
+    # Reset index for cleaner output
+    deduplicated_df = deduplicated_df.reset_index(drop=True)
 
-        if len(group_list) == 1:
-            # Single record for this customer, keep it
-            deduplicated_records.extend(group_list)
-            continue
+    return deduplicated_df
 
-        # Process multiple records for the same customer
-        keep_records = []
-
-        for i in range(len(group_list)):
-            current_record = group_list[i]
-            should_keep = True
-
-            # Check if the next record is a renewal within 7 days
-            if i < len(group_list) - 1:
-                next_record = group_list[i + 1]
-
-                # Calculate days between current expiration and next creation
-                days_diff = (next_record['Created Date'] - current_record['Expiration Date']).days
-
-                # If next record starts within 7 days after current expires, it's a renewal
-                if days_diff <= 7:
-                    should_keep = False  # Remove the older record
-
-            if should_keep:
-                keep_records.append(current_record)
-
-        deduplicated_records.extend(keep_records)
-
-    # Convert back to DataFrame and sort by Customer Name
-    result_df = pd.DataFrame(deduplicated_records)
-    result_df = result_df.sort_values('Customer Name')
-
-    return result_df
 
 def _calculate_all_membership_flags(df):
     """
@@ -289,7 +268,7 @@ def format_for_hubspot_export(df):
     """
     hubspot_df = df.copy()
 
-    # Format dates to YYYY-MM-DD string format for HubSpot compatibility
+    # Format dates toimbangkan-MM-DD string format for HubSpot compatibility
     # Do this BEFORE calling _calculate_all_membership_flags if those dates are needed
     # for the helper function. The helper creates its own _dt_ts versions.
     if 'Created Date' in hubspot_df.columns:
