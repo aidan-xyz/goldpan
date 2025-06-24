@@ -262,10 +262,11 @@ def add_individual_boolean_tags_for_excel(df):
     """
     Adds individual boolean columns for each tag status for Excel export.
     Outputs as True/False booleans (actual Python booleans, which pandas will write as TRUE/FALSE).
+    Also adds separate columns for Common vs. Business Email Domains.
     """
     excel_df = df.copy()
 
-    # Calculate all core boolean flags and add Email Domain
+    # Calculate all core boolean flags and add Email Domain (which is needed for splitting)
     excel_df = _calculate_all_membership_flags(excel_df)
 
     # --- Populate new boolean columns based on calculated flags ---
@@ -285,11 +286,25 @@ def add_individual_boolean_tags_for_excel(df):
     excel_df['Recently Renewed (True)'] = excel_df['_is_recently_renewed']
     excel_df['Recently Renewed (False)'] = ~excel_df['_is_recently_renewed']
 
-    # Drop temporary datetime columns and the intermediate flag columns
+    # --- Split Email Domain into Common and Business ---
+    excel_df['Common Email Domain'] = None # Initialize with None
+    excel_df['Business Email Domain'] = None # Initialize with None
+
+    for idx, row in excel_df.iterrows():
+        domain = row['Email Domain']
+        if pd.notna(domain) and domain in COMMON_FREE_EMAIL_DOMAINS:
+            excel_df.at[idx, 'Common Email Domain'] = domain
+        elif pd.notna(domain): # It's a non-common domain
+            excel_df.at[idx, 'Business Email Domain'] = domain
+
+
+    # Drop temporary datetime columns, the intermediate flag columns, and the combined 'Email Domain' column
     excel_df = excel_df.drop(columns=[
         'Start Date_dt_ts', 'Expiration Date_dt_ts',
+        'Membership Status Tags List', # This one isn't created in this path but kept for safety
         '_is_high_value', '_is_hfo_buy', '_is_active_membership',
-        '_is_expiring_soon', '_is_recently_renewed'
+        '_is_expiring_soon', '_is_recently_renewed',
+        'Email Domain' # Remove the combined email domain column
     ], errors='ignore')
 
     # Remove 'Expiration Category' if it exists, as it's replaced by detailed booleans
@@ -303,7 +318,7 @@ def format_for_hubspot_export(df):
     """
     Formats the dataframe for HubSpot export by creating a single multi-select tag column,
     including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings', 'Cust ID',
-    and 'Email Domain', and removing specified columns.
+    and split 'Common Email Domain' and 'Business Email Domain', and removing specified columns.
 
     Args:
         df: DataFrame with processed membership data.
@@ -369,6 +384,18 @@ def format_for_hubspot_export(df):
     # Join the lists into a semicolon-separated string for the final column
     hubspot_df['Membership Status Tags'] = hubspot_df['Membership Status Tags List'].apply(lambda x: ';'.join(x))
 
+    # --- Split Email Domain into Common and Business for HubSpot ---
+    hubspot_df['Common Email Domain'] = None # Initialize with None
+    hubspot_df['Business Email Domain'] = None # Initialize with None
+
+    for idx, row in hubspot_df.iterrows():
+        domain = row['Email Domain']
+        if pd.notna(domain) and domain in COMMON_FREE_EMAIL_DOMAINS:
+            hubspot_df.at[idx, 'Common Email Domain'] = domain
+        elif pd.notna(domain): # It's a non-common domain
+            hubspot_df.at[idx, 'Business Email Domain'] = domain
+
+
     # --- Clean up temporary columns ---
 
     # Drop the temporary datetime objects used for calculations and the intermediate list column
@@ -376,7 +403,8 @@ def format_for_hubspot_export(df):
         'Start Date_dt_ts', 'Expiration Date_dt_ts', # From _calculate_all_membership_flags
         'Membership Status Tags List', 
         '_is_high_value', '_is_hfo_buy', '_is_active_membership', # The boolean flags themselves
-        '_is_expiring_soon', '_is_recently_renewed'
+        '_is_expiring_soon', '_is_recently_renewed',
+        'Email Domain' # Remove the combined email domain column
     ], errors='ignore')
 
     # Drop the 'Expiration Category' if it exists
@@ -409,7 +437,8 @@ def format_for_hubspot_export(df):
         'Customer Name',
         'Contact Email',
         'Cust ID', 
-        'Email Domain', # ADDED Email Domain here
+        'Common Email Domain', # ADDED Common Email Domain here
+        'Business Email Domain', # ADDED Business Email Domain here
         'Membership Status Tags',
         'Total Order Value',
         'Estimated Savings'
