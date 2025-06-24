@@ -153,26 +153,26 @@ def deduplicate_memberships(df):
     df['Created Date'] = pd.to_datetime(df['Created Date'], errors='coerce')
     df['Expiration Date'] = pd.to_datetime(df['Expiration Date'], errors='coerce')
 
-    # Create a normalized Customer Name for better grouping if needed
+    # Create a normalized Customer Name for better grouping if needed (used for internal sorting in this function)
     df['Normalized Customer Name'] = df['Customer Name'].astype(str).str.upper().str.strip().str.replace(r'[^A-Z0-9\s]', '', regex=True).str.replace(r'\s+', ' ', regex=True)
 
-    # Extract email domains
-    df['Email Domain'] = df['Contact Email'].apply(_extract_domain_from_email)
+    # Extract email domains for internal deduplication logic
+    df['Internal_Email_Domain'] = df['Contact Email'].apply(_extract_domain_from_email)
 
     # Drop rows where essential columns for deduplication are NaT or None after conversion/extraction
-    df_cleaned = df.dropna(subset=['Customer Name', 'Contact Email', 'Created Date', 'Expiration Date', 'Email Domain']).copy()
+    df_cleaned = df.dropna(subset=['Customer Name', 'Contact Email', 'Created Date', 'Expiration Date', 'Internal_Email_Domain']).copy()
 
     # Separate into corporate and personal email domains
-    corporate_emails_df = df_cleaned[~df_cleaned['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
-    personal_emails_df = df_cleaned[df_cleaned['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
+    corporate_emails_df = df_cleaned[~df_cleaned['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
+    personal_emails_df = df_cleaned[df_cleaned['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
 
     # --- Deduplicate Corporate Emails by Domain ---
     if not corporate_emails_df.empty:
         corporate_emails_df_sorted = corporate_emails_df.sort_values(
-            by=['Email Domain', 'Expiration Date', 'Created Date'],
+            by=['Internal_Email_Domain', 'Expiration Date', 'Created Date'],
             ascending=[True, False, False] # Latest Expiration Date, then Latest Created Date
         )
-        deduplicated_df_parts.append(corporate_emails_df_sorted.drop_duplicates(subset=['Email Domain'], keep='first'))
+        deduplicated_df_parts.append(corporate_emails_df_sorted.drop_duplicates(subset=['Internal_Email_Domain'], keep='first'))
 
     # --- Deduplicate Personal Emails by Full Email Address ---
     if not personal_emails_df.empty:
@@ -188,8 +188,8 @@ def deduplicate_memberships(df):
     else:
         result_df = pd.DataFrame(columns=df.columns) # Return empty DataFrame if no data
 
-    # Drop temporary columns before returning
-    result_df = result_df.drop(columns=['Email Domain', 'Normalized Customer Name'], errors='ignore')
+    # Drop temporary internal columns before returning
+    result_df = result_df.drop(columns=['Internal_Email_Domain', 'Normalized Customer Name'], errors='ignore')
 
     # Sort the final combined DataFrame by Customer Name (original column)
     result_df = result_df.sort_values('Customer Name').reset_index(drop=True)
@@ -201,6 +201,7 @@ def _calculate_all_membership_flags(df):
     """
     Helper function to calculate all boolean flags for membership status and value.
     Returns a DataFrame with original columns + new boolean flag columns (prefixed with _is_).
+    Also adds 'Email Domain' for output.
     """
     flagged_df = df.copy()
 
@@ -217,6 +218,10 @@ def _calculate_all_membership_flags(df):
 
     # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
     total_value_series = pd.to_numeric(flagged_df.get('Total Order Value', pd.Series(0, index=flagged_df.index)), errors='coerce').fillna(0)
+
+    # --- Add Email Domain for output ---
+    flagged_df['Email Domain'] = flagged_df['Contact Email'].apply(_extract_domain_from_email)
+
 
     # --- Calculate Flags ---
 
@@ -260,7 +265,7 @@ def add_individual_boolean_tags_for_excel(df):
     """
     excel_df = df.copy()
 
-    # Calculate all core boolean flags first
+    # Calculate all core boolean flags and add Email Domain
     excel_df = _calculate_all_membership_flags(excel_df)
 
     # --- Populate new boolean columns based on calculated flags ---
@@ -297,8 +302,8 @@ def add_individual_boolean_tags_for_excel(df):
 def format_for_hubspot_export(df):
     """
     Formats the dataframe for HubSpot export by creating a single multi-select tag column,
-    including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings', and 'Cust ID',
-    and removing specified columns.
+    including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings', 'Cust ID',
+    and 'Email Domain', and removing specified columns.
 
     Args:
         df: DataFrame with processed membership data.
@@ -318,7 +323,7 @@ def format_for_hubspot_export(df):
     if 'Expiration Date' in hubspot_df.columns:
         hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
 
-    # Calculate all core boolean flags first
+    # Calculate all core boolean flags and add Email Domain
     hubspot_df = _calculate_all_membership_flags(hubspot_df)
 
     # Create a list column to hold tags for each row
@@ -403,7 +408,8 @@ def format_for_hubspot_export(df):
     final_hubspot_columns = [
         'Customer Name',
         'Contact Email',
-        'Cust ID', # ADDED Cust ID back into the final HubSpot output here
+        'Cust ID', 
+        'Email Domain', # ADDED Email Domain here
         'Membership Status Tags',
         'Total Order Value',
         'Estimated Savings'
