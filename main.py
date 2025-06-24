@@ -127,6 +127,21 @@ def _extract_domain_from_email(email):
         return email.split('@')[-1].lower()
     return None
 
+def _add_temporary_email_domain_flags(df):
+    """
+    Adds temporary 'Email Domain' and '_is_common_email_domain' flags to the DataFrame.
+    These flags are used for early processing steps like conditional name normalization.
+    """
+    temp_df = df.copy()
+    if 'Contact Email' in temp_df.columns:
+        temp_df['Email Domain'] = temp_df['Contact Email'].apply(_extract_domain_from_email)
+        temp_df['_is_common_email_domain'] = temp_df['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)
+    else:
+        temp_df['Email Domain'] = None
+        temp_df['_is_common_email_domain'] = False # Default to False if no email column
+    return temp_df
+
+
 def deduplicate_memberships(df):
     """
     Deduplicate customer memberships by prioritizing the most recent record (latest Expiration Date,
@@ -153,8 +168,9 @@ def deduplicate_memberships(df):
     df['Created Date'] = pd.to_datetime(df['Created Date'], errors='coerce')
     df['Expiration Date'] = pd.to_datetime(df['Expiration Date'], errors='coerce')
 
-    # Create a normalized Customer Name for better grouping if needed (used for internal sorting in this function)
-    df['Normalized Customer Name'] = df['Customer Name'].astype(str).str.upper().str.strip().str.replace(r'[^A-Z0-9\s]', '', regex=True).str.replace(r'\s+', ' ', regex=True)
+    # Create an internal normalized Customer Name for better grouping if needed (used for internal sorting in this function)
+    # The actual 'Customer Name' column has already been conditionally title-cased in process_file.
+    df['Internal_Normalized_Customer_Name'] = df['Customer Name'].astype(str).str.upper().str.strip().str.replace(r'[^A-Z0-9\s]', '', regex=True).str.replace(r'\s+', ' ', regex=True)
 
     # Extract email domains for internal deduplication logic
     df['Internal_Email_Domain'] = df['Contact Email'].apply(_extract_domain_from_email)
@@ -189,9 +205,9 @@ def deduplicate_memberships(df):
         result_df = pd.DataFrame(columns=df.columns) # Return empty DataFrame if no data
 
     # Drop temporary internal columns before returning
-    result_df = result_df.drop(columns=['Internal_Email_Domain', 'Normalized Customer Name'], errors='ignore')
+    result_df = result_df.drop(columns=['Internal_Email_Domain', 'Internal_Normalized_Customer_Name'], errors='ignore')
 
-    # Sort the final combined DataFrame by Customer Name (original column)
+    # Sort the final combined DataFrame by Customer Name (original column, now conditionally title-cased)
     result_df = result_df.sort_values('Customer Name').reset_index(drop=True)
 
     return result_df
@@ -286,7 +302,7 @@ def add_individual_boolean_tags_for_excel(df):
     excel_df['Recently Renewed (True)'] = excel_df['_is_recently_renewed']
     excel_df['Recently Renewed (False)'] = ~excel_df['_is_recently_renewed']
 
-    # --- Split Contact Email into Common and Business Domain Columns ---
+    # --- Split Contact Email into Common and Business ---
     excel_df['Contact Email (Common Domain)'] = excel_df.apply(
         lambda row: row['Contact Email'] if row['_is_common_email_domain'] else pd.NA, axis=1
     )
@@ -474,6 +490,18 @@ def process_file():
             # Read both Excel files
             membership_df = pd.read_excel(membership_file)
             orders_df = pd.read_excel(orders_file)
+
+            # --- Step 1: Add temporary email domain flags for conditional name normalization ---
+            if 'Contact Email' in membership_df.columns and 'Customer Name' in membership_df.columns:
+                membership_df = _add_temporary_email_domain_flags(membership_df)
+
+                # Apply title case ONLY to Customer Names associated with common email domains
+                membership_df.loc[membership_df['_is_common_email_domain'], 'Customer Name'] = \
+                    membership_df['Customer Name'].loc[membership_df['_is_common_email_domain']].astype(str).str.title()
+
+                # Drop the temporary flags before passing to subsequent steps
+                membership_df = membership_df.drop(columns=['Email Domain', '_is_common_email_domain'], errors='ignore')
+            # ----------------------------------------------------------------------------------
 
             # Show preview of original data
             original_count = len(membership_df)
