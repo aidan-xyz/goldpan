@@ -201,7 +201,7 @@ def _calculate_all_membership_flags(df):
     """
     Helper function to calculate all boolean flags for membership status and value.
     Returns a DataFrame with original columns + new boolean flag columns (prefixed with _is_).
-    Also adds 'Email Domain' for output.
+    Also adds 'Email Domain' and '_is_common_email_domain' flag.
     """
     flagged_df = df.copy()
 
@@ -219,9 +219,9 @@ def _calculate_all_membership_flags(df):
     # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
     total_value_series = pd.to_numeric(flagged_df.get('Total Order Value', pd.Series(0, index=flagged_df.index)), errors='coerce').fillna(0)
 
-    # --- Add Email Domain for output ---
+    # --- Add Email Domain for output and Common/Business flag ---
     flagged_df['Email Domain'] = flagged_df['Contact Email'].apply(_extract_domain_from_email)
-
+    flagged_df['_is_common_email_domain'] = flagged_df['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)
 
     # --- Calculate Flags ---
 
@@ -266,7 +266,7 @@ def add_individual_boolean_tags_for_excel(df):
     """
     excel_df = df.copy()
 
-    # Calculate all core boolean flags and add Email Domain (which is needed for splitting)
+    # Calculate all core boolean flags and add Email Domain and _is_common_email_domain
     excel_df = _calculate_all_membership_flags(excel_df)
 
     # --- Populate new boolean columns based on calculated flags ---
@@ -286,16 +286,13 @@ def add_individual_boolean_tags_for_excel(df):
     excel_df['Recently Renewed (True)'] = excel_df['_is_recently_renewed']
     excel_df['Recently Renewed (False)'] = ~excel_df['_is_recently_renewed']
 
-    # --- Split Email Domain into Common and Business ---
-    excel_df['Common Email Domain'] = None # Initialize with None
-    excel_df['Business Email Domain'] = None # Initialize with None
-
-    for idx, row in excel_df.iterrows():
-        domain = row['Email Domain']
-        if pd.notna(domain) and domain in COMMON_FREE_EMAIL_DOMAINS:
-            excel_df.at[idx, 'Common Email Domain'] = domain
-        elif pd.notna(domain): # It's a non-common domain
-            excel_df.at[idx, 'Business Email Domain'] = domain
+    # --- Split Contact Email into Common and Business Domain Columns ---
+    excel_df['Contact Email (Common Domain)'] = excel_df.apply(
+        lambda row: row['Contact Email'] if row['_is_common_email_domain'] else pd.NA, axis=1
+    )
+    excel_df['Contact Email (Business Domain)'] = excel_df.apply(
+        lambda row: row['Contact Email'] if not row['_is_common_email_domain'] else pd.NA, axis=1
+    )
 
 
     # Drop temporary datetime columns, the intermediate flag columns, and the combined 'Email Domain' column
@@ -304,7 +301,8 @@ def add_individual_boolean_tags_for_excel(df):
         'Membership Status Tags List', # This one isn't created in this path but kept for safety
         '_is_high_value', '_is_hfo_buy', '_is_active_membership',
         '_is_expiring_soon', '_is_recently_renewed',
-        'Email Domain' # Remove the combined email domain column
+        'Email Domain', # Remove the combined email domain column
+        '_is_common_email_domain' # Remove the temporary flag
     ], errors='ignore')
 
     # Remove 'Expiration Category' if it exists, as it's replaced by detailed booleans
@@ -338,7 +336,7 @@ def format_for_hubspot_export(df):
     if 'Expiration Date' in hubspot_df.columns:
         hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
 
-    # Calculate all core boolean flags and add Email Domain
+    # Calculate all core boolean flags and add Email Domain and _is_common_email_domain
     hubspot_df = _calculate_all_membership_flags(hubspot_df)
 
     # Create a list column to hold tags for each row
@@ -384,17 +382,14 @@ def format_for_hubspot_export(df):
     # Join the lists into a semicolon-separated string for the final column
     hubspot_df['Membership Status Tags'] = hubspot_df['Membership Status Tags List'].apply(lambda x: ';'.join(x))
 
-    # --- Split Email Domain into Common and Business for HubSpot ---
-    hubspot_df['Common Email Domain'] = None # Initialize with None
-    hubspot_df['Business Email Domain'] = None # Initialize with None
-
-    for idx, row in hubspot_df.iterrows():
-        domain = row['Email Domain']
-        if pd.notna(domain) and domain in COMMON_FREE_EMAIL_DOMAINS:
-            hubspot_df.at[idx, 'Common Email Domain'] = domain
-        elif pd.notna(domain): # It's a non-common domain
-            hubspot_df.at[idx, 'Business Email Domain'] = domain
-
+    # --- Split Contact Email into Common and Business Domain Columns for HubSpot ---
+    # Using apply with lambda for row-wise processing to assign original email to the correct new column
+    hubspot_df['Contact Email (Common Domain)'] = hubspot_df.apply(
+        lambda row: row['Contact Email'] if row['_is_common_email_domain'] else '', axis=1
+    )
+    hubspot_df['Contact Email (Business Domain)'] = hubspot_df.apply(
+        lambda row: row['Contact Email'] if not row['_is_common_email_domain'] else '', axis=1
+    )
 
     # --- Clean up temporary columns ---
 
@@ -404,7 +399,8 @@ def format_for_hubspot_export(df):
         'Membership Status Tags List', 
         '_is_high_value', '_is_hfo_buy', '_is_active_membership', # The boolean flags themselves
         '_is_expiring_soon', '_is_recently_renewed',
-        'Email Domain' # Remove the combined email domain column
+        'Email Domain', # Remove the combined email domain column
+        '_is_common_email_domain' # Remove the temporary flag
     ], errors='ignore')
 
     # Drop the 'Expiration Category' if it exists
@@ -435,10 +431,10 @@ def format_for_hubspot_export(df):
     # Define the exact final columns and their order for HubSpot output
     final_hubspot_columns = [
         'Customer Name',
-        'Contact Email',
+        'Contact Email', # Keep original Contact Email
         'Cust ID', 
-        'Common Email Domain', # ADDED Common Email Domain here
-        'Business Email Domain', # ADDED Business Email Domain here
+        'Contact Email (Common Domain)', # ADDED Common Email Domain here
+        'Contact Email (Business Domain)', # ADDED Business Email Domain here
         'Membership Status Tags',
         'Total Order Value',
         'Estimated Savings'
