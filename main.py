@@ -257,7 +257,7 @@ def add_individual_boolean_tags_for_excel(df):
 def format_for_hubspot_export(df):
     """
     Formats the dataframe for HubSpot export by creating a single multi-select tag column,
-    including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings',
+    including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings', and 'Cust ID',
     and removing specified columns.
 
     Args:
@@ -268,7 +268,7 @@ def format_for_hubspot_export(df):
     """
     hubspot_df = df.copy()
 
-    # Format dates toimbangkan-MM-DD string format for HubSpot compatibility
+    # Format dates to YYYY-MM-DD string format for HubSpot compatibility
     # Do this BEFORE calling _calculate_all_membership_flags if those dates are needed
     # for the helper function. The helper creates its own _dt_ts versions.
     if 'Created Date' in hubspot_df.columns:
@@ -340,7 +340,7 @@ def format_for_hubspot_export(df):
 
     # --- Columns to remove from HubSpot output explicitly ---
     columns_to_remove_from_hubspot_output = [
-        'Cust ID',      # Original Customer ID
+        # 'Cust ID',      # NO LONGER REMOVING Cust ID
         'City',
         'State/Regi',   # State/Region
         'Membersh',     # Original Membership field
@@ -363,6 +363,7 @@ def format_for_hubspot_export(df):
     final_hubspot_columns = [
         'Customer Name',
         'Contact Email',
+        'Cust ID', # ADDED Cust ID back into the final HubSpot output here
         'Membership Status Tags',
         'Total Order Value',
         'Estimated Savings'
