@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import os
 from werkzeug.utils import secure_filename
 import tempfile
-import re # For email domain extraction
+import re # For email domain extraction and regex operations
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here' # REMINDER: Change this to a strong, securely stored key
@@ -18,6 +18,13 @@ COMMON_FREE_EMAIL_DOMAINS = {
     'icloud.com', 'protonmail.com', 'mail.com', 'gmx.com', 'zoho.com',
     'live.com', 'msn.com', 'yandex.com', 'qq.com', '163.com', 'sina.com'
 }
+
+# List of common acronyms that should always be uppercased when found in names
+ACRONYMS_TO_UPPERCASE = [
+    'llc', 'inc', 'corp', 'ltd', 'pty', 'plc', 'sarl', 's.a.', 'ag', 'nv', 'sas', 'gmbh',
+    'co', 'bros', 'llp', 'pvt', 'spzoo', 'bv' # Added more common ones
+]
+
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -496,8 +503,23 @@ def process_file():
                 membership_df = _add_temporary_email_domain_flags(membership_df)
 
                 # Apply title case ONLY to Customer Names associated with common email domains
-                membership_df.loc[membership_df['_is_common_email_domain'], 'Customer Name'] = \
-                    membership_df['Customer Name'].loc[membership_df['_is_common_email_domain']].astype(str).str.title()
+                common_domain_mask = membership_df['_is_common_email_domain']
+
+                # Get the subset of names to be processed
+                names_to_process = membership_df.loc[common_domain_mask, 'Customer Name'].astype(str)
+
+                # Apply title casing
+                processed_names = names_to_process.str.title()
+
+                # Apply acronym uppercasing within the title-cased names
+                for acronym in ACRONYMS_TO_UPPERCASE:
+                    # Use a regex that matches the whole word (case-insensitive)
+                    # \b ensures whole word match, re.escape handles special characters like '.' in 's.a.'
+                    processed_names = processed_names.apply(
+                        lambda x: re.sub(r'\b' + re.escape(acronym) + r'\b', acronym.upper(), x, flags=re.IGNORECASE)
+                    )
+
+                membership_df.loc[common_domain_mask, 'Customer Name'] = processed_names
 
                 # Drop the temporary flags before passing to subsequent steps
                 membership_df = membership_df.drop(columns=['Email Domain', '_is_common_email_domain'], errors='ignore')
