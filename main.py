@@ -164,7 +164,7 @@ def deduplicate_memberships(df):
 
     # Separate into corporate and personal email domains
     corporate_emails_df = df_cleaned[~df_cleaned['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
-    personal_emails_df = df_cleaned[personal_emails_df['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
+    personal_emails_df = df_cleaned[df_cleaned['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
 
     # --- Deduplicate Corporate Emails by Domain ---
     if not corporate_emails_df.empty:
@@ -175,7 +175,7 @@ def deduplicate_memberships(df):
         deduplicated_df_parts.append(corporate_emails_df_sorted.drop_duplicates(subset=['Internal_Email_Domain'], keep='first'))
 
     # --- Deduplicate Personal Emails by Full Email Address ---
-    if not personal_emails_df.empty:
+    if not personal_emails_df.empty: # Ensure personal_emails_df is not empty before processing
         personal_emails_df_sorted = personal_emails_df.sort_values(
             by=['Contact Email', 'Expiration Date', 'Created Date'], # Use full email as identifier
             ascending=[True, False, False] # Latest Expiration Date, then Latest Created Date
@@ -230,7 +230,6 @@ def _calculate_all_membership_flags(df):
 
     # Original Purchase Method (HFO Buy)
     # Check if 'Original Purchase Method' column exists and has non-empty/non-NaN values
-    # IMPORTANT FIX: Changed from 'Original Pu' to 'Original Purchase Method'
     if 'Original Purchase Method' in flagged_df.columns:
         flagged_df['_is_hfo_buy'] = flagged_df['Original Purchase Method'].apply(lambda x: pd.notna(x) and str(x).strip() != '')
     else:
@@ -258,6 +257,47 @@ def _calculate_all_membership_flags(df):
     flagged_df['_is_recently_renewed'] = flagged_df['_is_recently_renewed'].fillna(False) # Handle NaT
 
     return flagged_df
+
+def _generate_membership_status_tags_list(df_row):
+    """
+    Generates a list of membership status tags for a single row based on boolean flags.
+    This consolidates logic used by both HubSpot and Excel output formatting.
+    Assumes _is_high_value, _is_hfo_buy, etc., flags are already present in df_row.
+    """
+    current_tags = []
+
+    # High-Value Customer
+    if df_row['_is_high_value']:
+        current_tags.append('High-Value Customer')
+    else:
+        current_tags.append('Not High-Value Customer') 
+
+    # Original Purchase Method (HFO Buy / Not HFO Buy)
+    if df_row['_is_hfo_buy']:
+        current_tags.append('HFO Buy')
+    else:
+        current_tags.append('Not HFO Buy')
+
+    # Active Membership
+    if df_row['_is_active_membership']:
+        current_tags.append('Active Membership')
+    else:
+        current_tags.append('Not Active Membership') 
+
+    # Expiring Soon
+    if df_row['_is_expiring_soon']:
+        current_tags.append('Expiring Soon')
+    else:
+        current_tags.append('Not Expiring Soon') 
+
+    # Recently Renewed
+    if df_row['_is_recently_renewed']:
+        current_tags.append('Recently Renewed')
+    else:
+        current_tags.append('Not Recently Renewed') 
+
+    return current_tags
+
 
 def add_individual_boolean_tags_for_excel(df):
     """
@@ -290,7 +330,6 @@ def add_individual_boolean_tags_for_excel(df):
     # Drop temporary datetime columns, and the intermediate flag columns
     excel_df = excel_df.drop(columns=[
         'Start Date_dt_ts', 'Expiration Date_dt_ts',
-        'Membership Status Tags List', # This one isn't created in this path but kept for safety
         '_is_high_value', '_is_hfo_buy', '_is_active_membership',
         '_is_expiring_soon', '_is_recently_renewed'
     ], errors='ignore')
@@ -316,7 +355,7 @@ def format_for_hubspot_export(df):
     """
     hubspot_df = df.copy()
 
-    # Format dates toimbangkan-MM-DD string format for HubSpot compatibility
+    # Format dates to YYYY-MM-DD string format for HubSpot compatibility
     # Do this BEFORE calling _calculate_all_membership_flags if those dates are needed
     # for the helper function. The helper creates its own _dt_ts versions.
     if 'Created Date' in hubspot_df.columns:
@@ -329,45 +368,8 @@ def format_for_hubspot_export(df):
     # Calculate all core boolean flags and add Email Domain
     hubspot_df = _calculate_all_membership_flags(hubspot_df)
 
-    # Create a list column to hold tags for each row
-    hubspot_df['Membership Status Tags List'] = [[] for _ in range(len(hubspot_df))]
-
-    # --- Populate the list based on calculated flags ---
-
-    for idx, row in hubspot_df.iterrows():
-        current_tags = []
-
-        # High-Value Customer
-        if row['_is_high_value']:
-            current_tags.append('High-Value Customer')
-        else:
-            current_tags.append('Not High-Value Customer') 
-
-        # Original Purchase Method (HFO Buy / Not HFO Buy)
-        if row['_is_hfo_buy']:
-            current_tags.append('HFO Buy')
-        else:
-            current_tags.append('Not HFO Buy')
-
-        # Active Membership
-        if row['_is_active_membership']:
-            current_tags.append('Active Membership')
-        else:
-            current_tags.append('Not Active Membership') 
-
-        # Expiring Soon
-        if row['_is_expiring_soon']:
-            current_tags.append('Expiring Soon')
-        else:
-            current_tags.append('Not Expiring Soon') 
-
-        # Recently Renewed
-        if row['_is_recently_renewed']:
-            current_tags.append('Recently Renewed')
-        else:
-            current_tags.append('Not Recently Renewed') 
-
-        hubspot_df.at[idx, 'Membership Status Tags List'] = current_tags
+    # Use the new helper function to generate the tags list
+    hubspot_df['Membership Status Tags List'] = hubspot_df.apply(_generate_membership_status_tags_list, axis=1)
 
     # Join the lists into a semicolon-separated string for the final column
     hubspot_df['Membership Status Tags'] = hubspot_df['Membership Status Tags List'].apply(lambda x: ';'.join(x))
@@ -380,7 +382,6 @@ def format_for_hubspot_export(df):
         'Membership Status Tags List', 
         '_is_high_value', '_is_hfo_buy', '_is_active_membership', # The boolean flags themselves
         '_is_expiring_soon', '_is_recently_renewed'
-        # 'Email Domain', # Email Domain is explicitly included in final_hubspot_columns now
     ], errors='ignore')
 
     # Drop the 'Expiration Category' if it exists
