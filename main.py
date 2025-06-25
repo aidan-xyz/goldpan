@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import os
 from werkzeug.utils import secure_filename
 import tempfile
-import re # For email domain extraction and regex operations
+import re # For email domain extraction
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here' # REMINDER: Change this to a strong, securely stored key
@@ -18,13 +18,6 @@ COMMON_FREE_EMAIL_DOMAINS = {
     'icloud.com', 'protonmail.com', 'mail.com', 'gmx.com', 'zoho.com',
     'live.com', 'msn.com', 'yandex.com', 'qq.com', '163.com', 'sina.com'
 }
-
-# List of common acronyms that should always be uppercased when found in names
-ACRONYMS_TO_UPPERCASE = [
-    'llc', 'inc', 'corp', 'ltd', 'pty', 'plc', 'sarl', 's.a.', 'ag', 'nv', 'sas', 'gmbh',
-    'co', 'bros', 'llp', 'pvt', 'spzoo', 'bv' # Added more common ones
-]
-
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -134,21 +127,6 @@ def _extract_domain_from_email(email):
         return email.split('@')[-1].lower()
     return None
 
-def _add_temporary_email_domain_flags(df):
-    """
-    Adds temporary 'Email Domain' and '_is_common_email_domain' flags to the DataFrame.
-    These flags are used for early processing steps like conditional name normalization.
-    """
-    temp_df = df.copy()
-    if 'Contact Email' in temp_df.columns:
-        temp_df['Email Domain'] = temp_df['Contact Email'].apply(_extract_domain_from_email)
-        temp_df['_is_common_email_domain'] = temp_df['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)
-    else:
-        temp_df['Email Domain'] = None
-        temp_df['_is_common_email_domain'] = False # Default to False if no email column
-    return temp_df
-
-
 def deduplicate_memberships(df):
     """
     Deduplicate customer memberships by prioritizing the most recent record (latest Expiration Date,
@@ -176,7 +154,6 @@ def deduplicate_memberships(df):
     df['Expiration Date'] = pd.to_datetime(df['Expiration Date'], errors='coerce')
 
     # Create an internal normalized Customer Name for better grouping if needed (used for internal sorting in this function)
-    # The actual 'Customer Name' column has already been conditionally title-cased in process_file.
     df['Internal_Normalized_Customer_Name'] = df['Customer Name'].astype(str).str.upper().str.strip().str.replace(r'[^A-Z0-9\s]', '', regex=True).str.replace(r'\s+', ' ', regex=True)
 
     # Extract email domains for internal deduplication logic
@@ -214,7 +191,7 @@ def deduplicate_memberships(df):
     # Drop temporary internal columns before returning
     result_df = result_df.drop(columns=['Internal_Email_Domain', 'Internal_Normalized_Customer_Name'], errors='ignore')
 
-    # Sort the final combined DataFrame by Customer Name (original column, now conditionally title-cased)
+    # Sort the final combined DataFrame by Customer Name (original column)
     result_df = result_df.sort_values('Customer Name').reset_index(drop=True)
 
     return result_df
@@ -224,7 +201,7 @@ def _calculate_all_membership_flags(df):
     """
     Helper function to calculate all boolean flags for membership status and value.
     Returns a DataFrame with original columns + new boolean flag columns (prefixed with _is_).
-    Also adds 'Email Domain' and '_is_common_email_domain' flag.
+    Also adds 'Email Domain' for output.
     """
     flagged_df = df.copy()
 
@@ -242,9 +219,10 @@ def _calculate_all_membership_flags(df):
     # Ensure 'Total Order Value' is numeric and handle potential missingness by defaulting to 0
     total_value_series = pd.to_numeric(flagged_df.get('Total Order Value', pd.Series(0, index=flagged_df.index)), errors='coerce').fillna(0)
 
-    # --- Add Email Domain for output and Common/Business flag ---
+    # --- Add Email Domain for output ---
     flagged_df['Email Domain'] = flagged_df['Contact Email'].apply(_extract_domain_from_email)
-    flagged_df['_is_common_email_domain'] = flagged_df['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)
+    # The _is_common_email_domain flag is no longer needed here as it's not used in this simplified output path.
+
 
     # --- Calculate Flags ---
 
@@ -285,11 +263,11 @@ def add_individual_boolean_tags_for_excel(df):
     """
     Adds individual boolean columns for each tag status for Excel export.
     Outputs as True/False booleans (actual Python booleans, which pandas will write as TRUE/FALSE).
-    Also adds separate columns for Common vs. Business Email Domains.
+    Includes the single 'Email Domain' column.
     """
     excel_df = df.copy()
 
-    # Calculate all core boolean flags and add Email Domain and _is_common_email_domain
+    # Calculate all core boolean flags and add Email Domain
     excel_df = _calculate_all_membership_flags(excel_df)
 
     # --- Populate new boolean columns based on calculated flags ---
@@ -309,23 +287,12 @@ def add_individual_boolean_tags_for_excel(df):
     excel_df['Recently Renewed (True)'] = excel_df['_is_recently_renewed']
     excel_df['Recently Renewed (False)'] = ~excel_df['_is_recently_renewed']
 
-    # --- Split Contact Email into Common and Business ---
-    excel_df['Contact Email (Common Domain)'] = excel_df.apply(
-        lambda row: row['Contact Email'] if row['_is_common_email_domain'] else pd.NA, axis=1
-    )
-    excel_df['Contact Email (Business Domain)'] = excel_df.apply(
-        lambda row: row['Contact Email'] if not row['_is_common_email_domain'] else pd.NA, axis=1
-    )
-
-
-    # Drop temporary datetime columns, the intermediate flag columns, and the combined 'Email Domain' column
+    # Drop temporary datetime columns, and the intermediate flag columns
     excel_df = excel_df.drop(columns=[
         'Start Date_dt_ts', 'Expiration Date_dt_ts',
         'Membership Status Tags List', # This one isn't created in this path but kept for safety
         '_is_high_value', '_is_hfo_buy', '_is_active_membership',
-        '_is_expiring_soon', '_is_recently_renewed',
-        'Email Domain', # Remove the combined email domain column
-        '_is_common_email_domain' # Remove the temporary flag
+        '_is_expiring_soon', '_is_recently_renewed'
     ], errors='ignore')
 
     # Remove 'Expiration Category' if it exists, as it's replaced by detailed booleans
@@ -338,8 +305,8 @@ def add_individual_boolean_tags_for_excel(df):
 def format_for_hubspot_export(df):
     """
     Formats the dataframe for HubSpot export by creating a single multi-select tag column,
-    including 'Customer Name', 'Contact Email', 'Total Order Value', 'Estimated Savings', 'Cust ID',
-    and split 'Common Email Domain' and 'Business Email Domain', and removing specified columns.
+    including 'Customer Name', 'Contact Email', 'Cust ID', 'Email Domain',
+    'Total Order Value', 'Estimated Savings', and removing specified columns.
 
     Args:
         df: DataFrame with processed membership data.
@@ -359,7 +326,7 @@ def format_for_hubspot_export(df):
     if 'Expiration Date' in hubspot_df.columns:
         hubspot_df['Expiration Date'] = pd.to_datetime(hubspot_df['Expiration Date'], errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
 
-    # Calculate all core boolean flags and add Email Domain and _is_common_email_domain
+    # Calculate all core boolean flags and add Email Domain
     hubspot_df = _calculate_all_membership_flags(hubspot_df)
 
     # Create a list column to hold tags for each row
@@ -405,15 +372,6 @@ def format_for_hubspot_export(df):
     # Join the lists into a semicolon-separated string for the final column
     hubspot_df['Membership Status Tags'] = hubspot_df['Membership Status Tags List'].apply(lambda x: ';'.join(x))
 
-    # --- Split Contact Email into Common and Business Domain Columns for HubSpot ---
-    # Using apply with lambda for row-wise processing to assign original email to the correct new column
-    hubspot_df['Contact Email (Common Domain)'] = hubspot_df.apply(
-        lambda row: row['Contact Email'] if row['_is_common_email_domain'] else '', axis=1
-    )
-    hubspot_df['Contact Email (Business Domain)'] = hubspot_df.apply(
-        lambda row: row['Contact Email'] if not row['_is_common_email_domain'] else '', axis=1
-    )
-
     # --- Clean up temporary columns ---
 
     # Drop the temporary datetime objects used for calculations and the intermediate list column
@@ -421,9 +379,9 @@ def format_for_hubspot_export(df):
         'Start Date_dt_ts', 'Expiration Date_dt_ts', # From _calculate_all_membership_flags
         'Membership Status Tags List', 
         '_is_high_value', '_is_hfo_buy', '_is_active_membership', # The boolean flags themselves
-        '_is_expiring_soon', '_is_recently_renewed',
-        'Email Domain', # Remove the combined email domain column
-        '_is_common_email_domain' # Remove the temporary flag
+        '_is_expiring_soon', '_is_recently_renewed'
+        # 'Email Domain', # Email Domain is explicitly included in final_hubspot_columns now
+        # '_is_common_email_domain' # This temporary flag is not created in this path anymore
     ], errors='ignore')
 
     # Drop the 'Expiration Category' if it exists
@@ -432,7 +390,6 @@ def format_for_hubspot_export(df):
 
     # --- Columns to remove from HubSpot output explicitly ---
     columns_to_remove_from_hubspot_output = [
-        # 'Cust ID',      # NO LONGER REMOVING Cust ID - it's in final_hubspot_columns
         'City',
         'State/Regi',   # State/Region
         'Membersh',     # Original Membership field
@@ -456,8 +413,7 @@ def format_for_hubspot_export(df):
         'Customer Name',
         'Contact Email', # Keep original Contact Email
         'Cust ID', 
-        'Contact Email (Common Domain)', # ADDED Common Email Domain here
-        'Contact Email (Business Domain)', # ADDED Business Email Domain here
+        'Email Domain', # Re-added single Email Domain column
         'Membership Status Tags',
         'Total Order Value',
         'Estimated Savings'
@@ -498,32 +454,7 @@ def process_file():
             membership_df = pd.read_excel(membership_file)
             orders_df = pd.read_excel(orders_file)
 
-            # --- Step 1: Add temporary email domain flags for conditional name normalization ---
-            if 'Contact Email' in membership_df.columns and 'Customer Name' in membership_df.columns:
-                membership_df = _add_temporary_email_domain_flags(membership_df)
-
-                # Apply title case ONLY to Customer Names associated with common email domains
-                common_domain_mask = membership_df['_is_common_email_domain']
-
-                # Get the subset of names to be processed
-                names_to_process = membership_df.loc[common_domain_mask, 'Customer Name'].astype(str)
-
-                # Apply title casing
-                processed_names = names_to_process.str.title()
-
-                # Apply acronym uppercasing within the title-cased names
-                for acronym in ACRONYMS_TO_UPPERCASE:
-                    # Use a regex that matches the whole word (case-insensitive)
-                    # \b ensures whole word match, re.escape handles special characters like '.' in 's.a.'
-                    processed_names = processed_names.apply(
-                        lambda x: re.sub(r'\b' + re.escape(acronym) + r'\b', acronym.upper(), x, flags=re.IGNORECASE)
-                    )
-
-                membership_df.loc[common_domain_mask, 'Customer Name'] = processed_names
-
-                # Drop the temporary flags before passing to subsequent steps
-                membership_df = membership_df.drop(columns=['Email Domain', '_is_common_email_domain'], errors='ignore')
-            # ----------------------------------------------------------------------------------
+            # --- No conditional Customer Name normalization. Customer Name will retain original casing. ---
 
             # Show preview of original data
             original_count = len(membership_df)
