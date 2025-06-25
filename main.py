@@ -164,7 +164,7 @@ def deduplicate_memberships(df):
 
     # Separate into corporate and personal email domains
     corporate_emails_df = df_cleaned[~df_cleaned['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
-    personal_emails_df = df_cleaned[df_cleaned['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
+    personal_emails_df = df_cleaned[personal_emails_df['Internal_Email_Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)].copy()
 
     # --- Deduplicate Corporate Emails by Domain ---
     if not corporate_emails_df.empty:
@@ -221,7 +221,6 @@ def _calculate_all_membership_flags(df):
 
     # --- Add Email Domain for output ---
     flagged_df['Email Domain'] = flagged_df['Contact Email'].apply(_extract_domain_from_email)
-    # The _is_common_email_domain flag is no longer needed here as it's not used in this simplified output path.
 
 
     # --- Calculate Flags ---
@@ -230,9 +229,10 @@ def _calculate_all_membership_flags(df):
     flagged_df['_is_high_value'] = total_value_series > 1000
 
     # Original Purchase Method (HFO Buy)
-    # Check if 'Original Pu' column exists and has non-empty/non-NaN values
-    if 'Original Pu' in flagged_df.columns:
-        flagged_df['_is_hfo_buy'] = flagged_df['Original Pu'].apply(lambda x: pd.notna(x) and str(x).strip() != '')
+    # Check if 'Original Purchase Method' column exists and has non-empty/non-NaN values
+    # IMPORTANT FIX: Changed from 'Original Pu' to 'Original Purchase Method'
+    if 'Original Purchase Method' in flagged_df.columns:
+        flagged_df['_is_hfo_buy'] = flagged_df['Original Purchase Method'].apply(lambda x: pd.notna(x) and str(x).strip() != '')
     else:
         flagged_df['_is_hfo_buy'] = False # Default to False if column doesn't exist
 
@@ -381,7 +381,6 @@ def format_for_hubspot_export(df):
         '_is_high_value', '_is_hfo_buy', '_is_active_membership', # The boolean flags themselves
         '_is_expiring_soon', '_is_recently_renewed'
         # 'Email Domain', # Email Domain is explicitly included in final_hubspot_columns now
-        # '_is_common_email_domain' # This temporary flag is not created in this path anymore
     ], errors='ignore')
 
     # Drop the 'Expiration Category' if it exists
@@ -394,7 +393,7 @@ def format_for_hubspot_export(df):
         'State/Regi',   # State/Region
         'Membersh',     # Original Membership field
         'Sales Doc',
-        'Original Pu',  # Original Purchase (now part of tags, so remove column)
+        'Original Purchase Method', # Explicitly remove now that its purpose is served in tagging
         'HFO',
         'Contact ID',
         'Contact Ni',   # Contact Nickname
@@ -413,7 +412,7 @@ def format_for_hubspot_export(df):
         'Customer Name',
         'Contact Email', # Keep original Contact Email
         'Cust ID', 
-        'Email Domain', # Re-added single Email Domain column
+        'Email Domain', # Single Email Domain column
         'Membership Status Tags',
         'Total Order Value',
         'Estimated Savings'
@@ -454,7 +453,7 @@ def process_file():
             membership_df = pd.read_excel(membership_file)
             orders_df = pd.read_excel(orders_file)
 
-            # --- No conditional Customer Name normalization. Customer Name will retain original casing. ---
+            # Customer Name will retain original casing from input
 
             # Show preview of original data
             original_count = len(membership_df)
