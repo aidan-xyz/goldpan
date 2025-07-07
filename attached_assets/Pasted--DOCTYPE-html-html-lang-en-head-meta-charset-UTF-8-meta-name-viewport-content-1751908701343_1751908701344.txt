@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Separator App: Identify Non-WC Prospects</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="font-sans bg-gray-100 flex justify-center items-center min-h-screen">
+    <div class="container bg-white p-10 rounded-2xl shadow-xl max-w-md w-full">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">Identify Non-WC Prospects</h1>
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <ul class="flash bg-red-200 text-red-700 py-3 px-4 rounded-lg mb-4 font-medium">
+                    {% for message in messages %}
+                        <li>{{ message }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+        <form action="/process_separator" method="post" enctype="multipart/form-data" class="space-y-6">
+            <div>
+                <label for="orders_file" class="block text-gray-700 text-sm font-medium mb-2">Upload Tooling Orders Excel File:</label>
+                <input type="file" name="orders_file" id="orders_file" accept=".xlsx,.xls" required
+                       class="block w-full border-2 border-gray-200 rounded-xl p-3 bg-gray-50 text-gray-700
+                              file:bg-indigo-500 file:text-white file:border-none file:py-2 file:px-4 file:rounded-lg
+                              file:cursor-pointer file:mr-4 file:transition-colors file:duration-200 file:ease-in-out
+                              file:hover:bg-indigo-600">
+                <p class="mt-1 text-sm text-gray-500">Only .xlsx and .xls files are allowed.</p>
+            </div>
+            <button type="submit" class="btn btn-primary inline-flex items-center justify-center py-3 px-6 rounded-xl font-semibold
+                                        transition-all duration-200 ease-in-out cursor-pointer shadow-md
+                                        bg-indigo-600 text-white hover:bg-indigo-700 hover:-translate-y-0.5 hover:shadow-lg w-full">
+                Process Orders
+            </button>
+        </form>
+    </div>
+</body>
+</html>
