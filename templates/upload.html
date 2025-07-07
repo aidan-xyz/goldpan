@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Customer Membership Deduplication</title>
+    <title>Customer Data Analysis & Prospect Identification</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         .container {
@@ -26,17 +26,18 @@
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">GoldPan</h1>
+        <h1 class="text-center mb-4">GoldPan - Customer Analysis Platform</h1>
         
         <div class="card">
             <div class="card-body">
-                <h5 class="card-title">How it works:</h5>
+                <h5 class="card-title">What GoldPan Does:</h5>
                 <ul class="list-unstyled">
-                    <li>✓ Groups customers by name</li>
-                    <li>✓ Sorts records by creation date (newest first)</li>
-                    <li>✓ Identifies renewals within 7 days of expiration</li>
-                    <li>✓ Keeps only the most recent record for renewals</li>
-                    <li>✓ Preserves expired memberships with no renewals</li>
+                    <li>✓ <strong>Phase 1:</strong> Analyzes membership data with order history for complete customer insights</li>
+                    <li>✓ <strong>Phase 2:</strong> Identifies high-value prospects who haven't used WC services</li>
+                    <li>✓ Deduplicates customers by email domain (corporate) or full email (personal)</li>
+                    <li>✓ Calculates customer value tiers and potential savings</li>
+                    <li>✓ Tags customers by membership status, purchase history, and renewal patterns</li>
+                    <li>✓ Exports data for Excel analysis or HubSpot import</li>
                 </ul>
             </div>
         </div>
@@ -55,15 +56,16 @@
             <!-- Phase 1: Standard Processing -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5>Phase 1: Standard Membership Processing</h5>
+                    <h5>Phase 1: Customer Membership & Order Analysis</h5>
+                    <small class="text-muted">Combines membership data with order history to create comprehensive customer profiles</small>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="/process" enctype="multipart/form-data">
                         <div class="upload-area mb-4">
                             <div class="mb-3">
                                 <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                <h4>Upload Membership Excel File</h4>
-                                <p class="text-muted">Select your customer membership Excel file (.xlsx or .xls)</p>
+                                <h4>Upload Customer Membership File</h4>
+                                <p class="text-muted">Your customer membership database with contact details and membership history</p>
                                 <input type="file" class="form-control" name="membership_file" accept=".xlsx,.xls" required>
                             </div>
                         </div>
@@ -71,8 +73,8 @@
                         <div class="upload-area">
                             <div class="mb-3">
                                 <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                <h4>Upload Orders Excel File</h4>
-                                <p class="text-muted">Select your customer orders Excel file (.xlsx or .xls)</p>
+                                <h4>Upload Customer Orders File</h4>
+                                <p class="text-muted">Order history data to calculate customer value and savings potential</p>
                                 <input type="file" class="form-control" name="orders_file" accept=".xlsx,.xls" required>
                             </div>
                         </div>
@@ -84,16 +86,19 @@
                             <div class="card-body">
                                 <label class="form-label">Export Format:</label>
                                 <select class="form-select" name="export_format">
-                                    <option value="standard">Standard Excel (.xlsx)</option>
-                                    <option value="hubspot">HubSpot CSV (.csv)</option>
+                                    <option value="standard">Excel Analysis (.xlsx) - Detailed customer tags and boolean flags</option>
+                                    <option value="hubspot">HubSpot Import (.csv) - Multi-select tags for CRM import</option>
                                 </select>
-                                <small class="text-muted">HubSpot format includes individual boolean columns for customer status tags</small>
+                                <small class="text-muted">
+                                    <strong>Excel:</strong> Individual boolean columns for detailed analysis<br>
+                                    <strong>HubSpot:</strong> Consolidated tags for easy CRM import with membership status tracking
+                                </small>
                             </div>
                         </div>
                         
                         <div class="text-center mt-4">
                             <button type="submit" class="btn btn-primary btn-lg">
-                                Process Phase 1 (Standard)
+                                <i class="fas fa-chart-line"></i> Analyze Customer Data
                             </button>
                         </div>
                     </form>
@@ -103,22 +108,34 @@
             <!-- Phase 2: Non-WC Prospects Processing -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5>Phase 2: Non-WC Prospects Identification</h5>
+                    <h5>Phase 2: Non-WC Prospect Identification</h5>
+                    <small class="text-muted">Find high-value customers who haven't used WC services yet</small>
                 </div>
                 <div class="card-body">
                     <form method="POST" action="/process_phase_two" enctype="multipart/form-data">
                         <div class="upload-area">
                             <div class="mb-3">
                                 <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                <h4>Upload Orders Excel File</h4>
-                                <p class="text-muted">Select your orders Excel file to identify non-WC prospects (.xlsx or .xls)</p>
+                                <h4>Upload Orders File Only</h4>
+                                <p class="text-muted">Analyzes order data to identify prospects who have never used WC services</p>
                                 <input type="file" class="form-control" name="orders_file" accept=".xlsx,.xls" required>
                             </div>
                         </div>
                         
+                        <div class="alert alert-info mt-3">
+                            <strong>What Phase 2 Does:</strong>
+                            <ul class="mb-0 mt-2">
+                                <li>Filters out any customers who have ever had a "WC Order" marked as "yes"</li>
+                                <li>Calculates total order value for remaining prospects</li>
+                                <li>Identifies high-value prospects (>$1,000 in orders)</li>
+                                <li>Calculates potential WC savings (5% of total orders)</li>
+                                <li>Generates two files: All prospects + High-value prospects</li>
+                            </ul>
+                        </div>
+                        
                         <div class="text-center mt-4">
                             <button type="submit" class="btn btn-success btn-lg">
-                                Process Phase 2 (Non-WC Prospects)
+                                <i class="fas fa-search-dollar"></i> Find Non-WC Prospects
                             </button>
                         </div>
                     </form>
@@ -129,32 +146,34 @@
         <div class="mt-4">
             <div class="card">
                 <div class="card-header">
-                    <h6>Expected Excel Columns:</h6>
+                    <h6>Required Excel Columns:</h6>
                 </div>
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-6">
-                            <strong>Membership File:</strong>
+                            <strong>Membership File (Phase 1):</strong>
                             <small class="text-muted d-block">
-                                Cust ID, Customer Name, City, State/Region, Membership, Created Date, Expiration Date, 
-                                Sales Doc, Original Purchase Method, HFO, Contact ID, Contact Name, Contact Email, Contact Phone
+                                <strong>Required:</strong> Cust ID, Customer Name, Contact Email, Created Date, Expiration Date<br>
+                                <strong>Optional:</strong> City, State/Region, Membership, Sales Doc, Original Purchase Method, HFO, Contact ID, Contact Name, Contact Phone
                             </small>
                         </div>
                         <div class="col-md-6">
-                            <strong>Orders File:</strong>
+                            <strong>Orders File (Both Phases):</strong>
                             <small class="text-muted d-block">
-                                SAP ID (Column A), Total Value (Column L), and other order details
+                                <strong>Required:</strong> SAP ID, Customer Name, Total Value<br>
+                                <strong>Phase 2 Only:</strong> WC Order (to filter non-WC prospects)
                             </small>
                         </div>
                     </div>
                     <div class="row mt-3">
                         <div class="col-12">
-                            <strong>HubSpot Export Features:</strong>
+                            <strong>Output Features:</strong>
                             <small class="text-muted d-block">
-                                • Dates formatted as YYYY-MM-DD<br>
-                                • Individual boolean columns for customer status tags<br>
-                                • High/Low value classification based on $500 threshold<br>
-                                • Estimated Savings column (Total Order Value × 8%)
+                                • <strong>Customer Segmentation:</strong> High-value vs. standard customers (>$1,000 threshold)<br>
+                                • <strong>Membership Status:</strong> Active, expiring soon, recently renewed, expired<br>
+                                • <strong>Value Calculations:</strong> Total order value, estimated savings (8% for members, 5% for prospects)<br>
+                                • <strong>Smart Deduplication:</strong> By company domain for business emails, individual for personal emails<br>
+                                • <strong>CRM Ready:</strong> Formatted for direct import into HubSpot or Excel analysis
                             </small>
                         </div>
                     </div>
