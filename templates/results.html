@@ -30,7 +30,7 @@
                 <div class="card stats-card">
                     <div class="card-body text-center">
                         <h3>{{ original_count }}</h3>
-                        <p class="mb-0">Original Records</p>
+                        <p class="mb-0">{{ 'Original Orders' if export_format == 'phase_two' else 'Original Records' }}</p>
                     </div>
                 </div>
             </div>
@@ -38,7 +38,7 @@
                 <div class="card stats-card">
                     <div class="card-body text-center">
                         <h3>{{ deduplicated_count }}</h3>
-                        <p class="mb-0">After Deduplication</p>
+                        <p class="mb-0">{{ 'Non-WC Prospects' if export_format == 'phase_two' else 'After Deduplication' }}</p>
                     </div>
                 </div>
             </div>
@@ -46,16 +46,27 @@
                 <div class="card stats-card">
                     <div class="card-body text-center">
                         <h3>{{ reduction }}</h3>
-                        <p class="mb-0">Records Removed</p>
+                        <p class="mb-0">{{ 'WC Orders Filtered' if export_format == 'phase_two' else 'Records Removed' }}</p>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="text-center mb-4">
-            <a href="/download/{{ filename }}" class="btn btn-success btn-lg me-3">
-                <i class="fas fa-download"></i> Download {{ 'HubSpot CSV' if export_format == 'hubspot' else 'Standard Excel' }} File
-            </a>
+            {% if export_format == 'phase_two' %}
+                <a href="/download/{{ filename }}" class="btn btn-success btn-lg me-3">
+                    <i class="fas fa-download"></i> Download Non-WC Prospects File
+                </a>
+                {% if high_value_filename %}
+                    <a href="/download/{{ high_value_filename }}" class="btn btn-warning btn-lg me-3">
+                        <i class="fas fa-download"></i> Download High-Value Prospects
+                    </a>
+                {% endif %}
+            {% else %}
+                <a href="/download/{{ filename }}" class="btn btn-success btn-lg me-3">
+                    <i class="fas fa-download"></i> Download {{ 'HubSpot CSV' if export_format == 'hubspot' else 'Standard Excel' }} File
+                </a>
+            {% endif %}
             <a href="/" class="btn btn-secondary btn-lg">
                 <i class="fas fa-upload"></i> Process More Files
             </a>
@@ -63,7 +74,7 @@
 
         <div class="card">
             <div class="card-header">
-                <h5>Preview of Processed Data (First 10 Records)</h5>
+                <h5>Preview of {{ 'Non-WC Prospects' if export_format == 'phase_two' else 'Processed Data' }} (First 10 Records)</h5>
             </div>
             <div class="card-body">
                 <div class="table-container">

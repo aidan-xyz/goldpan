@@ -52,45 +52,78 @@
                 {% endif %}
             {% endwith %}
 
-            <form method="POST" action="/process" enctype="multipart/form-data">
-                <div class="upload-area mb-4">
-                    <div class="mb-3">
-                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                        <h4>Upload Membership Excel File</h4>
-                        <p class="text-muted">Select your customer membership Excel file (.xlsx or .xls)</p>
-                        <input type="file" class="form-control" name="membership_file" accept=".xlsx,.xls" required>
-                    </div>
+            <!-- Phase 1: Standard Processing -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Phase 1: Standard Membership Processing</h5>
                 </div>
-                
-                <div class="upload-area">
-                    <div class="mb-3">
-                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                        <h4>Upload Orders Excel File</h4>
-                        <p class="text-muted">Select your customer orders Excel file (.xlsx or .xls)</p>
-                        <input type="file" class="form-control" name="orders_file" accept=".xlsx,.xls" required>
-                    </div>
+                <div class="card-body">
+                    <form method="POST" action="/process" enctype="multipart/form-data">
+                        <div class="upload-area mb-4">
+                            <div class="mb-3">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h4>Upload Membership Excel File</h4>
+                                <p class="text-muted">Select your customer membership Excel file (.xlsx or .xls)</p>
+                                <input type="file" class="form-control" name="membership_file" accept=".xlsx,.xls" required>
+                            </div>
+                        </div>
+                        
+                        <div class="upload-area">
+                            <div class="mb-3">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h4>Upload Orders Excel File</h4>
+                                <p class="text-muted">Select your customer orders Excel file (.xlsx or .xls)</p>
+                                <input type="file" class="form-control" name="orders_file" accept=".xlsx,.xls" required>
+                            </div>
+                        </div>
+                        
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h5>Export Options</h5>
+                            </div>
+                            <div class="card-body">
+                                <label class="form-label">Export Format:</label>
+                                <select class="form-select" name="export_format">
+                                    <option value="standard">Standard Excel (.xlsx)</option>
+                                    <option value="hubspot">HubSpot CSV (.csv)</option>
+                                </select>
+                                <small class="text-muted">HubSpot format includes individual boolean columns for customer status tags</small>
+                            </div>
+                        </div>
+                        
+                        <div class="text-center mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                Process Phase 1 (Standard)
+                            </button>
+                        </div>
+                    </form>
                 </div>
-                
-                <div class="card mt-4">
-                    <div class="card-header">
-                        <h5>Export Options</h5>
-                    </div>
-                    <div class="card-body">
-                        <label class="form-label">Export Format:</label>
-                        <select class="form-select" name="export_format">
-                            <option value="standard">Standard Excel (.xlsx)</option>
-                            <option value="hubspot">HubSpot CSV (.csv)</option>
-                        </select>
-                        <small class="text-muted">HubSpot format includes individual boolean columns for customer status tags</small>
-                    </div>
+            </div>
+
+            <!-- Phase 2: Non-WC Prospects Processing -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Phase 2: Non-WC Prospects Identification</h5>
                 </div>
-                
-                <div class="text-center mt-4">
-                    <button type="submit" class="btn btn-primary btn-lg">
-                        Process Files
-                    </button>
+                <div class="card-body">
+                    <form method="POST" action="/process_phase_two" enctype="multipart/form-data">
+                        <div class="upload-area">
+                            <div class="mb-3">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h4>Upload Orders Excel File</h4>
+                                <p class="text-muted">Select your orders Excel file to identify non-WC prospects (.xlsx or .xls)</p>
+                                <input type="file" class="form-control" name="orders_file" accept=".xlsx,.xls" required>
+                            </div>
+                        </div>
+                        
+                        <div class="text-center mt-4">
+                            <button type="submit" class="btn btn-success btn-lg">
+                                Process Phase 2 (Non-WC Prospects)
+                            </button>
+                        </div>
+                    </form>
                 </div>
-            </form>
+            </div>
         </div>
 
         <div class="mt-4">

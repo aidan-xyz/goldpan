@@ -341,6 +341,74 @@ def add_individual_boolean_tags_for_excel(df):
     return excel_df
 
 
+def process_phase_two_orders(orders_df):
+    """
+    Process orders file to identify non-WC prospects (Phase 2).
+    
+    Args:
+        orders_df: DataFrame with orders data
+        
+    Returns:
+        tuple: (final_prospect_data, high_value_prospects)
+    """
+    # Ensure required columns exist
+    required_cols = ['SAP ID', 'Customer Name', 'Total Value']
+    for col in required_cols:
+        if col not in orders_df.columns:
+            raise ValueError(f"Required column '{col}' not found in the orders file.")
+
+    # Ensure IDs and Names are strings and clean 'nan' values
+    orders_df['SAP ID'] = orders_df['SAP ID'].astype(str).replace('nan', '').replace('<NA>', '')
+    orders_df['Customer Name'] = orders_df['Customer Name'].astype(str).replace('nan', '').replace('<NA>', '')
+
+    # Convert Total Value to numeric, handling any non-numeric values
+    orders_df['Total Value'] = pd.to_numeric(orders_df['Total Value'], errors='coerce').fillna(0)
+
+    # Ensure 'WC Order' column exists and standardize values
+    if 'WC Order' not in orders_df.columns:
+        orders_df['WC Order'] = ''  # If column doesn't exist, treat as no 'yes' entries
+    orders_df['WC Order'] = orders_df['WC Order'].astype(str).str.lower().str.strip()
+
+    # --- Step 1: Determine which SAP IDs ever had a 'yes' WC Order ---
+    wc_status_per_sap_id = orders_df.groupby('SAP ID')['WC Order'].apply(lambda x: (x == 'yes').any()).reset_index()
+    wc_status_per_sap_id.columns = ['SAP ID', '_has_any_wc_order_yes']
+
+    # Filter to get only SAP IDs that NEVER had a 'yes' WC Order
+    non_wc_order_sap_ids = wc_status_per_sap_id[~wc_status_per_sap_id['_has_any_wc_order_yes']]['SAP ID']
+
+    # Filter the original orders_df to include only these non-WC order companies
+    clean_orders_df = orders_df[orders_df['SAP ID'].isin(non_wc_order_sap_ids)].copy()
+
+    # --- Step 2: Aggregate total orders for these clean companies ---
+    final_prospect_data = clean_orders_df.groupby(['SAP ID', 'Customer Name']).agg(
+        Total_Order_Value=('Total Value', 'sum')
+    ).reset_index()
+
+    final_prospect_data.rename(columns={'SAP ID': 'Cust ID'}, inplace=True)
+
+    # --- Step 3: Calculate Potential WC Savings (Total Order Value * 0.05) ---
+    final_prospect_data['Potential WC Savings'] = final_prospect_data['Total_Order_Value'] * 0.05
+
+    # --- Step 4: Identify High-Value Prospects ---
+    final_prospect_data['Is High-Value Prospect'] = final_prospect_data['Total_Order_Value'] > 1000
+
+    # Prepare high-value prospects data
+    high_value_prospects = final_prospect_data[final_prospect_data['Is High-Value Prospect']][['Customer Name', 'Cust ID', 'Total_Order_Value', 'Potential WC Savings']]
+
+    # --- Final Column Renames and Ordering for Output ---
+    final_prospect_data.rename(columns={'Total_Order_Value': 'Total Order Value'}, inplace=True)
+    output_columns = [
+        'Customer Name',
+        'Cust ID',
+        'Total Order Value',
+        'Potential WC Savings',
+        'Is High-Value Prospect'
+    ]
+    final_prospect_data = final_prospect_data[output_columns]
+
+    return final_prospect_data, high_value_prospects
+
+
 def format_for_hubspot_export(df):
     """
     Formats the dataframe for HubSpot export by creating a single multi-select tag column,
@@ -506,6 +574,62 @@ def process_file():
 
         except Exception as e:
             flash(f'Error processing files: {str(e)}')
+            return redirect(url_for('upload_file'))
+    else:
+        flash('Invalid file type. Please upload Excel files (.xlsx or .xls)')
+        return redirect(url_for('upload_file'))
+
+
+@app.route('/process_phase_two', methods=['POST'])
+def process_phase_two():
+    # Check if orders file is present
+    if 'orders_file' not in request.files:
+        flash('Orders file is required for Phase 2 processing')
+        return redirect(request.url)
+
+    orders_file = request.files['orders_file']
+
+    if orders_file.filename == '':
+        flash('Orders file must be selected')
+        return redirect(request.url)
+
+    if orders_file and allowed_file(orders_file.filename):
+        try:
+            # Read orders Excel file
+            orders_df = pd.read_excel(orders_file)
+
+            # Process phase two to identify non-WC prospects
+            final_prospect_data, high_value_prospects = process_phase_two_orders(orders_df)
+
+            # Save both files to temporary location
+            temp_dir = tempfile.gettempdir()
+            
+            # Main prospects file
+            output_filename = f"non_wc_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
+            output_path = os.path.join(temp_dir, output_filename)
+            
+            # High value prospects file
+            high_value_filename = f"high_value_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
+            high_value_path = os.path.join(temp_dir, high_value_filename)
+
+            # Save both files
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                final_prospect_data.to_excel(writer, index=False, sheet_name='Non-WC Prospects')
+                
+            with pd.ExcelWriter(high_value_path, engine='openpyxl') as writer:
+                high_value_prospects.to_excel(writer, index=False, sheet_name='High-Value Prospects')
+
+            return render_template('results.html', 
+                                   original_count=len(orders_df),
+                                   deduplicated_count=len(final_prospect_data),
+                                   reduction=len(orders_df) - len(final_prospect_data),
+                                   filename=output_filename,
+                                   high_value_filename=high_value_filename,
+                                   export_format='phase_two',
+                                   preview_data=final_prospect_data.head(10).to_html(classes='table table-striped', index=False))
+
+        except Exception as e:
+            flash(f'Error processing Phase 2 file: {str(e)}')
             return redirect(url_for('upload_file'))
     else:
         flash('Invalid file type. Please upload Excel files (.xlsx or .xls)')
