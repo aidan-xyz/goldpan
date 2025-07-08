@@ -19,8 +19,49 @@ COMMON_FREE_EMAIL_DOMAINS = {
     'live.com', 'msn.com', 'yandex.com', 'qq.com', '163.com', 'sina.com'
 }
 
+# Common acronyms to preserve in uppercase during title recasing
+COMMON_ACRONYMS = {
+    'LLC', 'INC', 'CO', 'CORP', 'LTD', 'PLC', 'GMBH', 'AG', 'SA', 'NV', 'BV', 
+    'PTE', 'S.A.', 'C.A.', 'S.R.L.', 'SPA', 'SAS', 'SARL', 'KG', 'OHG', 'LP', 
+    'LLP', 'PC', 'PA', 'PS', 'SC', 'SD', 'USA', 'UK', 'CA', 'DE', 'FR', 'IT', 
+    'JP', 'MX', 'AU', 'NZ', 'EU', 'NA', 'APAC', 'EMEA', 'LATAM', 'WC'
+}
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def recase_company_name(name):
+    """
+    Recases a company name to title case, preserving common acronyms in uppercase.
+    Handles various delimiters and ensures consistent spacing.
+    """
+    if not isinstance(name, str) or not name:
+        return name
+
+    # Convert to uppercase first, then split by non-alphanumeric characters or spaces
+    # This helps in handling names like "ABC-DEF" or "GHI.JKL"
+    words = re.split(r'[^a-zA-Z0-9]+', name.upper())
+
+    recase_words = []
+    for word in words:
+        if word in COMMON_ACRONYMS:
+            recase_words.append(word)
+        elif word: # Ensure word is not empty
+            recase_words.append(word.capitalize())
+
+    # Join back with a single space, then replace specific acronyms with their original casing if they were split
+    # This part needs careful handling if acronyms are part of a larger word, but for standalone acronyms, it's fine.
+    # For example, "ABC LLC" -> "Abc LLC"
+    # Re-join with a space and then re-apply specific acronyms.
+    final_name = ' '.join(recase_words)
+
+    # Specific replacements for common acronyms that might have been title-cased if not in the list
+    # This loop ensures that even if an acronym was part of a hyphenated word, it gets corrected.
+    for acr in sorted(list(COMMON_ACRONYMS), key=len, reverse=True): # Sort by length to match longer acronyms first
+        final_name = re.sub(r'\b' + acr.capitalize() + r'\b', acr, final_name)
+
+    return final_name.strip()
+
 
 def process_orders_and_add_value_tiers(membership_df, orders_df):
     """
@@ -344,10 +385,10 @@ def add_individual_boolean_tags_for_excel(df):
 def process_phase_two_orders(orders_df):
     """
     Process orders file to identify non-WC prospects (Phase 2).
-    
+
     Args:
         orders_df: DataFrame with orders data
-        
+
     Returns:
         tuple: (final_prospect_data, high_value_prospects)
     """
@@ -392,8 +433,13 @@ def process_phase_two_orders(orders_df):
     # --- Step 4: Identify High-Value Prospects ---
     final_prospect_data['Is High-Value Prospect'] = final_prospect_data['Total_Order_Value'] > 1000
 
-    # Prepare high-value prospects data
-    high_value_prospects = final_prospect_data[final_prospect_data['Is High-Value Prospect']][['Customer Name', 'Cust ID', 'Total_Order_Value', 'Potential WC Savings']]
+    # Apply smart title recasing to Customer Name for Phase 2
+    final_prospect_data['Customer Name'] = final_prospect_data['Customer Name'].apply(recase_company_name)
+
+    # Prepare high-value prospects data (also recase Customer Name here)
+    high_value_prospects = final_prospect_data[final_prospect_data['Is High-Value Prospect']][['Customer Name', 'Cust ID', 'Total_Order_Value', 'Potential WC Savings']].copy()
+    high_value_prospects['Customer Name'] = high_value_prospects['Customer Name'].apply(recase_company_name)
+
 
     # --- Final Column Renames and Ordering for Output ---
     final_prospect_data.rename(columns={'Total_Order_Value': 'Total Order Value'}, inplace=True)
@@ -522,8 +568,6 @@ def process_file():
             membership_df = pd.read_excel(membership_file)
             orders_df = pd.read_excel(orders_file)
 
-            # Customer Name will retain original casing from input
-
             # Show preview of original data
             original_count = len(membership_df)
 
@@ -537,6 +581,13 @@ def process_file():
             # Categorize and sort by expiration status (this adds 'Expiration Category')
             # This step is kept as it might be used internally or for other non-HubSpot exports
             final_df = categorize_and_sort_memberships(processed_df)
+
+            # Apply title recasing ONLY on common emails for Phase 1
+            if 'Contact Email' in final_df.columns and 'Customer Name' in final_df.columns:
+                final_df['Email Domain'] = final_df['Contact Email'].apply(_extract_domain_from_email)
+                common_email_mask = final_df['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)
+                final_df.loc[common_email_mask, 'Customer Name'] = final_df.loc[common_email_mask, 'Customer Name'].apply(recase_company_name)
+                final_df = final_df.drop(columns=['Email Domain'], errors='ignore') # Drop the temporary column
 
             # Apply HubSpot formatting if selected
             if export_format == 'hubspot':
@@ -593,6 +644,9 @@ def process_phase_two():
         flash('Orders file must be selected')
         return redirect(request.url)
 
+    # Get export format for Phase 2
+    export_format_phase_two = request.form.get('export_format_phase_two', 'standard_phase_two')
+
     if orders_file and allowed_file(orders_file.filename):
         try:
             # Read orders Excel file
@@ -603,29 +657,44 @@ def process_phase_two():
 
             # Save both files to temporary location
             temp_dir = tempfile.gettempdir()
-            
-            # Main prospects file
-            output_filename = f"non_wc_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
-            output_path = os.path.join(temp_dir, output_filename)
-            
-            # High value prospects file
-            high_value_filename = f"high_value_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
-            high_value_path = os.path.join(temp_dir, high_value_filename)
+
+            # Determine file extension and filename based on export format
+            if export_format_phase_two == 'hubspot_phase_two':
+                file_extension = 'csv'
+                main_output_filename = f"hubspot_non_wc_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.csv"
+                high_value_output_filename = f"hubspot_high_value_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.csv"
+
+                # For HubSpot, we might want a simplified output for high-value prospects too
+                # Assuming high_value_prospects already has recased names and desired columns
+                # If further HubSpot specific formatting is needed for high_value_prospects,
+                # a separate function similar to format_for_hubspot_export might be required.
+                # For now, we'll just save it as CSV.
+            else: # standard_phase_two
+                file_extension = 'xlsx'
+                main_output_filename = f"non_wc_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
+                high_value_output_filename = f"high_value_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
+
+            main_output_path = os.path.join(temp_dir, main_output_filename)
+            high_value_output_path = os.path.join(temp_dir, high_value_output_filename)
 
             # Save both files
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                final_prospect_data.to_excel(writer, index=False, sheet_name='Non-WC Prospects')
-                
-            with pd.ExcelWriter(high_value_path, engine='openpyxl') as writer:
-                high_value_prospects.to_excel(writer, index=False, sheet_name='High-Value Prospects')
+            if file_extension == 'csv':
+                final_prospect_data.to_csv(main_output_path, index=False)
+                high_value_prospects.to_csv(high_value_output_path, index=False)
+            else:
+                with pd.ExcelWriter(main_output_path, engine='openpyxl') as writer:
+                    final_prospect_data.to_excel(writer, index=False, sheet_name='Non-WC Prospects')
+
+                with pd.ExcelWriter(high_value_output_path, engine='openpyxl') as writer:
+                    high_value_prospects.to_excel(writer, index=False, sheet_name='High-Value Prospects')
 
             return render_template('results.html', 
                                    original_count=len(orders_df),
                                    deduplicated_count=len(final_prospect_data),
                                    reduction=len(orders_df) - len(final_prospect_data),
-                                   filename=output_filename,
-                                   high_value_filename=high_value_filename,
-                                   export_format='phase_two',
+                                   filename=main_output_filename,
+                                   high_value_filename=high_value_output_filename,
+                                   export_format=export_format_phase_two, # Pass the new export format
                                    preview_data=final_prospect_data.head(10).to_html(classes='table table-striped', index=False))
 
         except Exception as e:
