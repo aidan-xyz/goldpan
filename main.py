@@ -49,15 +49,13 @@ def recase_company_name(name):
         elif word: # Ensure word is not empty
             recase_words.append(word.capitalize())
 
-    # Join back with a single space, then replace specific acronyms with their original casing if they were split
-    # This part needs careful handling if acronyms are part of a larger word, but for standalone acronyms, it's fine.
-    # For example, "ABC LLC" -> "Abc LLC"
-    # Re-join with a space and then re-apply specific acronyms.
+    # Initialize final_name here to ensure it always has a value
     final_name = ' '.join(recase_words)
 
     # Specific replacements for common acronyms that might have been title-cased if not in the list
     # This loop ensures that even if an acronym was part of a hyphenated word, it gets corrected.
     for acr in sorted(list(COMMON_ACRONYMS), key=len, reverse=True): # Sort by length to match longer acronyms first
+        # Use regex to match whole words to avoid replacing parts of other words (e.g., 'INC' in 'INCORPORATED')
         final_name = re.sub(r'\b' + acr.capitalize() + r'\b', acr, final_name)
 
     return final_name.strip()
@@ -469,7 +467,7 @@ def format_for_hubspot_export(df):
     """
     hubspot_df = df.copy()
 
-    # Format dates to YYYY-MM-DD string format for HubSpot compatibility
+    # Format dates toYYYY-MM-DD string format for HubSpot compatibility
     # Do this BEFORE calling _calculate_all_membership_flags if those dates are needed
     # for the helper function. The helper creates its own _dt_ts versions.
     if 'Created Date' in hubspot_df.columns:
@@ -568,7 +566,6 @@ def process_file():
             membership_df = pd.read_excel(membership_file)
             orders_df = pd.read_excel(orders_file)
 
-            # Show preview of original data
             original_count = len(membership_df)
 
             # Perform deduplication on membership data
@@ -578,29 +575,51 @@ def process_file():
             # Process orders and add value tiers
             processed_df = process_orders_and_add_value_tiers(deduplicated_df, orders_df)
 
-            # Categorize and sort by expiration status (this adds 'Expiration Category')
-            # This step is kept as it might be used internally or for other non-HubSpot exports
-            final_df = categorize_and_sort_memberships(processed_df)
+            # Categorize and sort by expiration status
+            final_df_all = categorize_and_sort_memberships(processed_df)
 
-            # Apply title recasing ONLY on common emails for Phase 1
-            if 'Contact Email' in final_df.columns and 'Customer Name' in final_df.columns:
-                final_df['Email Domain'] = final_df['Contact Email'].apply(_extract_domain_from_email)
-                common_email_mask = final_df['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)
-                final_df.loc[common_email_mask, 'Customer Name'] = final_df.loc[common_email_mask, 'Customer Name'].apply(recase_company_name)
-                final_df = final_df.drop(columns=['Email Domain'], errors='ignore') # Drop the temporary column
+            # --- Phase 1: Split into corporate and personal emails, apply recasing for personal ---
+            personal_output_filename = None # Initialize to None
 
-            # Apply HubSpot formatting if selected
+            if 'Contact Email' in final_df_all.columns and 'Customer Name' in final_df_all.columns:
+                final_df_all['Email Domain'] = final_df_all['Contact Email'].apply(_extract_domain_from_email)
+
+                corporate_mask = ~final_df_all['Email Domain'].isin(COMMON_FREE_EMAIL_DOMAINS)
+
+                corporate_output_df = final_df_all[corporate_mask].copy()
+                personal_output_df = final_df_all[~corporate_mask].copy()
+
+                # Apply recasing to Customer Name for personal emails
+                if not personal_output_df.empty:
+                    personal_output_df['Customer Name'] = personal_output_df['Customer Name'].apply(recase_company_name)
+
+                    # Define columns for personal email output (simplified for HubSpot import)
+                    personal_export_cols = [
+                        'Customer Name', 'Contact Email', 'Cust ID', 
+                        'Total Order Value', 'Estimated Savings'
+                    ]
+                    personal_output_df = personal_output_df[[col for col in personal_export_cols if col in personal_output_df.columns]]
+
+                    # Save personal emails to a separate CSV
+                    temp_dir = tempfile.gettempdir()
+                    personal_output_filename = f"common_email_prospects_{secure_filename(membership_file.filename).rsplit('.', 1)[0]}.csv"
+                    personal_output_path = os.path.join(temp_dir, personal_output_filename)
+                    personal_output_df.to_csv(personal_output_path, index=False)
+
+                # The main processing continues with corporate_output_df
+                final_df = corporate_output_df.drop(columns=['Email Domain'], errors='ignore')
+            else:
+                # If no email column or name column, proceed with original final_df_all
+                final_df = final_df_all.drop(columns=['Email Domain'], errors='ignore') # Ensure Email Domain is dropped if it was added
+
+            # Now apply export format to the 'corporate' part (or the whole df if no split occurred)
             if export_format == 'hubspot':
                 final_df = format_for_hubspot_export(final_df)
-                # Remove empty columns again after HubSpot formatting
                 final_df = final_df.dropna(axis=1, how='all')
                 file_extension = 'csv'
                 output_filename = f"hubspot_{secure_filename(membership_file.filename).rsplit('.', 1)[0]}.csv"
             else: # Standard Excel output
-                # Add individual boolean tag columns for Excel verification
                 final_df = add_individual_boolean_tags_for_excel(final_df)
-                # Remove any columns that are now redundant or not desired in the Excel output
-                # (e.g., Expiration Category if it exists and is now redundant)
                 final_df = final_df.dropna(axis=1, how='all') 
                 file_extension = 'xlsx'
                 output_filename = f"processed_{secure_filename(membership_file.filename)}"
@@ -617,9 +636,10 @@ def process_file():
 
             return render_template('results.html', 
                                    original_count=original_count,
-                                   deduplicated_count=deduplicated_count,
+                                   deduplicated_count=deduplicated_count, # This count should reflect the total deduplicated before split
                                    reduction=original_count - deduplicated_count,
                                    filename=output_filename,
+                                   personal_filename=personal_output_filename, # Pass the new filename
                                    export_format=export_format,
                                    preview_data=final_df.head(10).to_html(classes='table table-striped', index=False))
 
