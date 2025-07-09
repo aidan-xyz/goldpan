@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deduplication Results</title>
+    <title>GoldPan - Processing Results</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
     <style>
@@ -14,22 +15,110 @@
         .stats-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        .stats-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        }
+        .feature-card {
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 12px;
+        }
+        .section-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px 12px 0 0;
         }
         .table-container {
             max-height: 400px;
             overflow-y: auto;
+            border-radius: 8px;
+        }
+        .btn-success {
+            background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 30px;
+            transition: all 0.3s ease;
+        }
+        .btn-success:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .btn-warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 30px;
+            transition: all 0.3s ease;
+        }
+        .btn-warning:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .btn-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 30px;
+            transition: all 0.3s ease;
+        }
+        .btn-info:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 30px;
+            transition: all 0.3s ease;
+        }
+        .btn-secondary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .download-section {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+        .stats-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            opacity: 0.9;
+        }
+        .success-header {
+            color: #28a745;
+            margin-bottom: 30px;
+        }
+        .table-striped > tbody > tr:nth-of-type(odd) > td {
+            background-color: rgba(0,0,0,.02);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mb-4">Process Complete!</h1>
+        <div class="text-center mb-5">
+            <h1 class="success-header">
+                <i class="fas fa-check-circle me-2"></i>Process Complete!
+            </h1>
+            <p class="lead text-muted">Your data has been successfully processed and is ready for download</p>
+        </div>
 
-        <div class="row mb-4">
+        <!-- Stats Cards -->
+        <div class="row mb-5">
             <div class="col-md-4">
                 <div class="card stats-card">
                     <div class="card-body text-center">
-                        <h3>{{ original_count }}</h3>
+                        <i class="fas fa-database stats-icon"></i>
+                        <h3 class="fw-bold">{{ original_count }}</h3>
                         <p class="mb-0">{{ 'Original Orders' if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' else 'Original Records' }}</p>
                     </div>
                 </div>
@@ -37,7 +126,8 @@
             <div class="col-md-4">
                 <div class="card stats-card">
                     <div class="card-body text-center">
-                        <h3>{{ deduplicated_count }}</h3>
+                        <i class="fas fa-{{ 'search-dollar' if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' else 'filter' }} stats-icon"></i>
+                        <h3 class="fw-bold">{{ deduplicated_count }}</h3>
                         <p class="mb-0">{{ 'Non-WC Prospects Identified' if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' else 'After Deduplication' }}</p>
                     </div>
                 </div>
@@ -45,41 +135,59 @@
             <div class="col-md-4">
                 <div class="card stats-card">
                     <div class="card-body text-center">
-                        <h3>{{ reduction }}</h3>
+                        <i class="fas fa-{{ 'minus-circle' if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' else 'trash-alt' }} stats-icon"></i>
+                        <h3 class="fw-bold">{{ reduction }}</h3>
                         <p class="mb-0">{{ 'WC Orders Filtered' if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' else 'Records Removed' }}</p>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="text-center mb-4">
-            {% if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' %}
-                <a href="/download/{{ filename }}" class="btn btn-success btn-lg me-3">
-                    <i class="fas fa-download"></i> Download Non-WC Prospects File ({{ 'HubSpot CSV' if export_format == 'hubspot_phase_two' else 'Excel' }})
-                </a>
-                {% if high_value_filename %}
-                    <a href="/download/{{ high_value_filename }}" class="btn btn-warning btn-lg me-3">
-                        <i class="fas fa-download"></i> Download High-Value Prospects ({{ 'HubSpot CSV' if export_format == 'hubspot_phase_two' else 'Excel' }})
+        <!-- Download Section -->
+        <div class="download-section">
+            <div class="text-center">
+                <h4 class="mb-4">
+                    <i class="fas fa-download me-2"></i>Download Your Results
+                </h4>
+                <div class="d-flex flex-wrap justify-content-center gap-3">
+                    {% if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' %}
+                        <a href="/download/{{ filename }}" class="btn btn-success btn-lg">
+                            <i class="fas fa-download me-2"></i>Download Non-WC Prospects
+                            <small class="d-block">{{ 'HubSpot CSV' if export_format == 'hubspot_phase_two' else 'Excel Format' }}</small>
+                        </a>
+                        {% if high_value_filename %}
+                            <a href="/download/{{ high_value_filename }}" class="btn btn-warning btn-lg">
+                                <i class="fas fa-star me-2"></i>Download High-Value Prospects
+                                <small class="d-block">{{ 'HubSpot CSV' if export_format == 'hubspot_phase_two' else 'Excel Format' }}</small>
+                            </a>
+                        {% endif %}
+                    {% else %}
+                        <a href="/download/{{ filename }}" class="btn btn-success btn-lg">
+                            <i class="fas fa-download me-2"></i>Download Domain-Based Results
+                            <small class="d-block">{{ 'HubSpot CSV' if export_format == 'hubspot' else 'Standard Excel' }}</small>
+                        </a>
+                        {% if personal_filename %}
+                            <a href="/download/{{ personal_filename }}" class="btn btn-info btn-lg">
+                                <i class="fas fa-at me-2"></i>Download Common Email Results
+                                <small class="d-block">CSV Format</small>
+                            </a>
+                        {% endif %}
+                    {% endif %}
+                    <a href="/" class="btn btn-secondary btn-lg">
+                        <i class="fas fa-upload me-2"></i>Process More Files
+                        <small class="d-block">Start Over</small>
                     </a>
-                {% endif %}
-            {% else %} {# This is the Phase 1 block #}
-                <a href="/download/{{ filename }}" class="btn btn-success btn-lg me-3">
-                    <i class="fas fa-download"></i> Download Domain-Based Results ({{ 'HubSpot CSV' if export_format == 'hubspot' else 'Standard Excel' }})
-                </a>
-                {% if personal_filename %} {# New condition for personal emails file #}
-                    <a href="/download/{{ personal_filename }}" class="btn btn-info btn-lg me-3">
-                        <i class="fas fa-download"></i> Download Common Email Results (CSV)
-                    </a>
-                {% endif %}
-            {% endif %}
-            <a href="/" class="btn btn-secondary btn-lg">
-                <i class="fas fa-upload"></i> Process More Files
-            </a>
+                </div>
+            </div>
         </div>
 
-        <div class="card">
-            <div class="card-header">
-                <h5>Preview of {{ 'Non-WC Prospects' if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' else 'Processed Data' }} (First 10 Records)</h5>
+        <!-- Data Preview -->
+        <div class="card feature-card">
+            <div class="card-header section-header">
+                <h4 class="mb-0">
+                    <i class="fas fa-table me-2"></i>Data Preview
+                </h4>
+                <small>{{ 'Non-WC Prospects' if export_format == 'phase_two' or export_format == 'standard_phase_two' or export_format == 'hubspot_phase_two' else 'Processed Data' }} (First 10 Records)</small>
             </div>
             <div class="card-body">
                 <div class="table-container">
