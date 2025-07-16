@@ -305,6 +305,9 @@ def _generate_membership_status_tags_list(df_row):
     """
     current_tags = []
 
+    # WC History - always true for membership data
+    current_tags.append('WC History')
+
     # High-Value Customer
     if df_row['_is_high_value']:
         current_tags.append('High-Value Customer')
@@ -351,6 +354,10 @@ def add_individual_boolean_tags_for_excel(df):
 
     # --- Populate new boolean columns based on calculated flags ---
 
+    # WC History - always true for membership data
+    excel_df['WC History (True)'] = True
+    excel_df['WC History (False)'] = False
+
     excel_df['High-Value Customer (True)'] = excel_df['_is_high_value']
     excel_df['High-Value Customer (False)'] = ~excel_df['_is_high_value']
 
@@ -379,6 +386,42 @@ def add_individual_boolean_tags_for_excel(df):
 
     return excel_df
 
+
+def _generate_prospect_tags_list(df_row):
+    """
+    Generates a list of prospect tags for a single row based on boolean flags.
+    Similar to membership tags but for prospects with no WC history.
+    """
+    current_tags = []
+
+    # WC History - always false for prospects
+    current_tags.append('No WC History')
+
+    # High-Value Customer
+    if df_row['Is High-Value Prospect']:
+        current_tags.append('High-Value Customer')
+    else:
+        current_tags.append('Not High-Value Customer') 
+
+    return current_tags
+
+def add_individual_boolean_tags_for_prospects_excel(df):
+    """
+    Adds individual boolean columns for each tag status for Excel export for prospects.
+    Outputs as True/False booleans for prospects with no WC history.
+    """
+    excel_df = df.copy()
+
+    # --- Populate new boolean columns based on prospect flags ---
+
+    # WC History - always false for prospects
+    excel_df['WC History (True)'] = False
+    excel_df['WC History (False)'] = True
+
+    excel_df['High-Value Customer (True)'] = excel_df['Is High-Value Prospect']
+    excel_df['High-Value Customer (False)'] = ~excel_df['Is High-Value Prospect']
+
+    return excel_df
 
 def process_phase_two_orders(orders_df):
     """
@@ -434,19 +477,27 @@ def process_phase_two_orders(orders_df):
     # Apply smart title recasing to Customer Name for Phase 2
     final_prospect_data['Customer Name'] = final_prospect_data['Customer Name'].apply(recase_company_name)
 
-    # Prepare high-value prospects data (also recase Customer Name here)
-    high_value_prospects = final_prospect_data[final_prospect_data['Is High-Value Prospect']][['Customer Name', 'Cust ID', 'Total_Order_Value', 'Potential WC Savings']].copy()
-    high_value_prospects['Customer Name'] = high_value_prospects['Customer Name'].apply(recase_company_name)
+    # --- Step 5: Add tagging system for prospects ---
+    final_prospect_data['Prospect Status Tags List'] = final_prospect_data.apply(_generate_prospect_tags_list, axis=1)
+    final_prospect_data['Prospect Status Tags'] = final_prospect_data['Prospect Status Tags List'].apply(lambda x: ';'.join(x))
 
+    # Prepare high-value prospects data (also recase Customer Name here)
+    high_value_prospects = final_prospect_data[final_prospect_data['Is High-Value Prospect']][['Customer Name', 'Cust ID', 'Total_Order_Value', 'Potential WC Savings', 'Prospect Status Tags']].copy()
+    high_value_prospects['Customer Name'] = high_value_prospects['Customer Name'].apply(recase_company_name)
 
     # --- Final Column Renames and Ordering for Output ---
     final_prospect_data.rename(columns={'Total_Order_Value': 'Total Order Value'}, inplace=True)
+    
+    # Drop the temporary list column
+    final_prospect_data = final_prospect_data.drop('Prospect Status Tags List', axis=1)
+    
     output_columns = [
         'Customer Name',
         'Cust ID',
         'Total Order Value',
         'Potential WC Savings',
-        'Is High-Value Prospect'
+        'Is High-Value Prospect',
+        'Prospect Status Tags'
     ]
     final_prospect_data = final_prospect_data[output_columns]
 
@@ -684,15 +735,16 @@ def process_phase_two():
                 main_output_filename = f"hubspot_non_wc_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.csv"
                 high_value_output_filename = f"hubspot_high_value_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.csv"
 
-                # For HubSpot, we might want a simplified output for high-value prospects too
-                # Assuming high_value_prospects already has recased names and desired columns
-                # If further HubSpot specific formatting is needed for high_value_prospects,
-                # a separate function similar to format_for_hubspot_export might be required.
-                # For now, we'll just save it as CSV.
+                # For HubSpot, we keep the data as-is with the Prospect Status Tags column
+                # Both files already have the tags column from process_phase_two_orders
             else: # standard_phase_two
                 file_extension = 'xlsx'
                 main_output_filename = f"non_wc_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
                 high_value_output_filename = f"high_value_prospects_{secure_filename(orders_file.filename).rsplit('.', 1)[0]}.xlsx"
+                
+                # For Excel, add individual boolean columns
+                final_prospect_data = add_individual_boolean_tags_for_prospects_excel(final_prospect_data)
+                high_value_prospects = add_individual_boolean_tags_for_prospects_excel(high_value_prospects)
 
             main_output_path = os.path.join(temp_dir, main_output_filename)
             high_value_output_path = os.path.join(temp_dir, high_value_output_filename)
