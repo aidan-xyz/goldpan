@@ -1,6 +1,6 @@
 # Goldpan v1: Smart Membership Data Processor & Revenue Accelerator
 
-## 🚀 Why I Built Goldpan v1
+## Why I Built Goldpan v1
 Goldpan v1 was born out of necessity. Our existing CRM, HubSpot, lacked the flexibility and power to handle the kind of advanced data processing, segmentation, and enrichment we needed without costly upgrades to Operations Hub Enterprise or manual workarounds.
 
 We needed a solution that:
@@ -10,7 +10,7 @@ We needed a solution that:
 
 Goldpan v1 is the custom tool I built to solve these problems, turning messy data into actionable insights at zero additional software cost.
 
-## ⚙️ How Goldpan v1 Works (The Process Flow)
+## How Goldpan v1 Works (The Process Flow)
 Goldpan v1 is a lightweight, Python-based Flask app that processes two core data files and outputs both CRM-ready lists and in-depth analysis reports. It empowers not only marketing, but also sales, operations, and leadership with clean, structured, and revenue-driven insights.
 
 ### Input Files:
@@ -28,7 +28,7 @@ Goldpan v1 is a lightweight, Python-based Flask app that processes two core data
 - **HubSpot CSV Export:** Auto-tagged contact list for direct CRM import with multi-select properties we could not easily generate in-app.
 - **Excel Deep Dive:** Detailed report for management, sales, or finance to analyze customer value and opportunity.
 
-## 🔑 Business Impact: Why Goldpan v1 Matters
+## Business Impact: Why Goldpan v1 Matters
 
 ### 1. Bypassing HubSpot Limitations
 Goldpan sidesteps the need for:
@@ -52,7 +52,7 @@ Goldpan is not just for me. It was built so that:
 - Sales, marketing, and management can all benefit from clearer data
 - The process is repeatable, fast, and requires minimal training
 
-## ✨ Key Features (Technical and Business Value)
+## Key Features (Technical and Business Value)
 
 | Feature | What It Does | Why It Matters |
 |---------|--------------|----------------|
@@ -62,7 +62,7 @@ Goldpan is not just for me. It was built so that:
 | **Dynamic Boolean Tags** | Adds multi-condition flags | Allows hyper-targeted marketing |
 | **Phase Two Prospecting** | Identifies untapped leads from Orders data | Surfaces new sales opportunities |
 
-## 💰 Cost Savings and Revenue Growth
+## Cost Savings and Revenue Growth
 - Avoids CRM upgrade costs (estimated $1,200 to $2,400 per year saved)
 - Reduces marketing waste by improving list quality
 - Drives new revenue through better upsells and cross-sells
